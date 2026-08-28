@@ -1,0 +1,25 @@
+# Normalise line endings so the same checkout works on Windows and macOS.
+#
+# This matters more than usual here: the app writes shell scripts out of string
+# templates in Dart source. If a Windows checkout rewrote those templates to
+# CRLF, the generated statusline-bridge.sh would fail on macOS with an
+# unhelpful error, because /bin/sh treats the trailing CR as part of the
+# command.
+* text=auto eol=lf
+
+# Windows batch genuinely wants CRLF.
+*.cmd    text eol=crlf
+*.bat    text eol=crlf
+*.ps1    text eol=crlf
+
+# Anything a POSIX shell reads must stay LF.
+*.command text eol=lf
+*.sh      text eol=lf
+
+# Xcode/Visual Studio project files and binaries.
+*.pbxproj text eol=lf
+*.png  binary
+*.ico  binary
+*.icns binary
+*.ttf  binary
+*.otf  binary

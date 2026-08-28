@@ -1,0 +1,112 @@
+name: Build
+
+# Builds the app on real Windows and macOS machines, so a Mac build can be
+# produced without owning a Mac.
+#
+#  * Run it by hand   -> Actions tab -> Build -> "Run workflow". The .app and
+#                        the .exe come out as downloadable artifacts.
+#  * Push a v* tag    -> the same builds are attached to a GitHub Release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: 3.44.7
+
+jobs:
+  macos:
+    name: macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+
+      - run: flutter build macos --release
+
+      # No Apple Developer ID here, so the bundle is ad-hoc signed: enough for
+      # macOS to run it locally, not enough to escape Gatekeeper's quarantine
+      # on a downloaded file. The README says what to do about that.
+      - name: Ad-hoc sign the bundle
+        run: |
+          APP="build/macos/Build/Products/Release/claude_usage_monitor.app"
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --verbose "$APP"
+
+      # ditto, not zip: it preserves the bundle's symlinks and resource forks.
+      - name: Package
+        run: |
+          APP="build/macos/Build/Products/Release/claude_usage_monitor.app"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" "Claude-Usage-Monitor-macOS.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Claude-Usage-Monitor-macOS
+          path: Claude-Usage-Monitor-macOS.zip
+          if-no-files-found: error
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - run: flutter pub get
+      - run: flutter analyze
+
+      - run: flutter build windows --release
+
+      # The exe needs the data\ folder and the DLLs beside it, so ship the
+      # whole Release folder rather than the executable on its own.
+      - name: Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* `
+                           -DestinationPath Claude-Usage-Monitor-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Claude-Usage-Monitor-Windows
+          path: Claude-Usage-Monitor-Windows.zip
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: [macos, windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            Claude-Usage-Monitor-macOS.zip \
+            Claude-Usage-Monitor-Windows.zip

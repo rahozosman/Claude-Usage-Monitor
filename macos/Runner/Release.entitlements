@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The App Sandbox is off on purpose. This app has to read Claude
+	     Code's own files (~/.claude/settings.json and the transcripts under
+	     ~/.claude/projects) and write its status-line bridge back into them.
+	     A sandboxed app cannot reach outside its container without the user
+	     picking every path by hand, which would defeat the point. It is a
+	     local developer utility distributed outside the App Store. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+	<key>com.apple.security.network.client</key>
+	<true/>
+</dict>
+</plist>
