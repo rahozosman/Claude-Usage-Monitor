@@ -6,13 +6,16 @@ import '../../app/theme/app_colors.dart';
 import '../../app/theme/app_dimens.dart';
 import '../../app/theme/app_motion.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/errors/app_error.dart';
 import '../../core/utils/format_utils.dart';
 import '../../models/cli_status.dart';
 import '../../models/connection_status.dart';
 import '../../models/usage_snapshot.dart';
+import '../../services/statusline_bridge_service.dart';
 import '../../widgets/about_card.dart';
 import '../../widgets/activity_card.dart';
 import '../../widgets/api_card.dart';
+import '../../widgets/app_button.dart';
 import '../../widgets/devices_card.dart';
 import '../../widgets/app_icon_button.dart';
 import '../../widgets/glass_panel.dart';
@@ -273,7 +276,7 @@ class _Banner extends StatelessWidget {
   }
 }
 
-class _CliCard extends StatelessWidget {
+class _CliCard extends StatefulWidget {
   const _CliCard({required this.cli, required this.snapshot, required this.opacity});
 
   final CliStatus cli;
@@ -281,10 +284,66 @@ class _CliCard extends StatelessWidget {
   final double opacity;
 
   @override
+  State<_CliCard> createState() => _CliCardState();
+}
+
+class _CliCardState extends State<_CliCard> {
+  /// The bridge is never put in place behind the user's back: the button next
+  /// to the status opens this confirmation, and only a deliberate "Install"
+  /// writes to `~/.claude/settings.json`.
+  bool _asking = false;
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _install() async {
+    final bridge = context.read<StatusLineBridgeService>();
+    final settings = context.read<SettingsController>();
+    final usage = context.read<UsageController>();
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await bridge.install();
+      // Remembered for good, so the offer never comes back to this spot.
+      await settings.update((s) => s.copyWith(bridgeAutoInstallDone: true));
+      await usage.refresh(force: true);
+      if (mounted) {
+        setState(() {
+          _asking = false;
+          _busy = false;
+        });
+      }
+    } on AppError catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _busy = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _error = 'Could not update settings.json (${e.runtimeType}).';
+          _busy = false;
+        });
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final cli = widget.cli;
+    final snapshot = widget.snapshot;
     final c = context.colors;
+    final motion = context.motion;
     final now = DateTime.now();
     final active = cli.sessionActive(now);
+    // Offered once, and only while there is a Claude Code to attach it to.
+    final offerBridge =
+        cli.installed &&
+        !cli.bridgeInstalled &&
+        !context.select<SettingsController, bool>((s) => s.settings.bridgeAutoInstallDone);
 
     final rows = <(String, String)>[
       ('Installed', cli.installed ? (cli.version ?? 'yes') : 'Not found on PATH'),
@@ -315,7 +374,7 @@ class _CliCard extends StatelessWidget {
 
     return GlassPanel(
       elevated: true,
-      opacity: opacity,
+      opacity: widget.opacity,
       radius: AppDimens.radiusLg,
       padding: const EdgeInsets.fromLTRB(AppDimens.s16, AppDimens.s14, AppDimens.s16, AppDimens.s14),
       child: Column(
@@ -323,17 +382,40 @@ class _CliCard extends StatelessWidget {
         children: <Widget>[
           SectionHeader(
             title: 'Claude Code',
-            trailing: StatusChip(
-              label: !cli.installed
-                  ? 'Not installed'
-                  : active
-                  ? 'Session active'
-                  : 'Installed',
-              color: !cli.installed ? c.statusOffline : (active ? c.connected : c.textTertiary),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                if (offerBridge) ...<Widget>[
+                  _BridgeInstallButton(
+                    motion: motion,
+                    // The hand only points while the ask is still unanswered.
+                    hint: !_asking,
+                    onTap: () => setState(() {
+                      _asking = !_asking;
+                      _error = null;
+                    }),
+                  ),
+                  const SizedBox(width: AppDimens.s12),
+                ],
+                StatusChip(
+                  label: !cli.installed
+                      ? 'Not installed'
+                      : active
+                      ? 'Session active'
+                      : 'Installed',
+                  color: !cli.installed ? c.statusOffline : (active ? c.connected : c.textTertiary),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: AppDimens.s10),
           DetailGrid(rows: rows),
+          AnimatedSize(
+            duration: motion.component,
+            curve: motion.transition,
+            alignment: Alignment.topCenter,
+            child: offerBridge && _asking ? _confirm(context, motion) : const SizedBox(width: double.infinity),
+          ),
           if (snapshot.subscriptionError != null)
             Padding(
               padding: const EdgeInsets.only(top: AppDimens.s8),
@@ -345,6 +427,204 @@ class _CliCard extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// The ask itself: what the install changes, and the two ways out of it.
+  Widget _confirm(BuildContext context, AppMotion motion) {
+    final c = context.colors;
+    final t = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(top: AppDimens.s10),
+      child: Container(
+        padding: const EdgeInsets.all(AppDimens.s12),
+        decoration: BoxDecoration(
+          color: c.accent.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(AppDimens.radiusMd),
+          border: Border.all(color: c.accent.withValues(alpha: 0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(
+              'Install the status-line bridge?',
+              style: t.bodySmall?.copyWith(color: c.textPrimary, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: AppDimens.s6),
+            Text(
+              'Adds a statusLine command to ~/.claude/settings.json (backed up first) so Claude Code hands its '
+              'official rate_limits JSON to this app after every response. A status line you already have keeps '
+              'working — the bridge forwards to it.',
+              style: t.bodySmall?.copyWith(color: c.textSecondary),
+            ),
+            if (_error != null) ...<Widget>[
+              const SizedBox(height: AppDimens.s6),
+              Text(_error!, style: t.bodySmall?.copyWith(color: c.statusWarning)),
+            ],
+            const SizedBox(height: AppDimens.s10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: <Widget>[
+                AppButton(
+                  label: 'Not now',
+                  motion: motion,
+                  onTap: _busy
+                      ? null
+                      : () => setState(() {
+                          _asking = false;
+                          _error = null;
+                        }),
+                ),
+                const SizedBox(width: AppDimens.s8),
+                AppButton(
+                  label: 'Install',
+                  style: AppButtonStyle.primary,
+                  motion: motion,
+                  loading: _busy,
+                  onTap: _install,
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The "Install" button offered beside the Claude Code status, with a hand
+/// tapping at it so the one thing the app still needs is impossible to miss.
+class _BridgeInstallButton extends StatelessWidget {
+  const _BridgeInstallButton({required this.motion, required this.hint, required this.onTap});
+
+  final AppMotion motion;
+  final bool hint;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: <Widget>[
+        AppButton(label: 'Install', style: AppButtonStyle.primary, motion: motion, onTap: onTap),
+        if (hint)
+          Positioned(
+            right: -8,
+            bottom: -9,
+            // Decoration only — every pixel of the button stays clickable.
+            child: IgnorePointer(child: _HandTouch(motion: motion)),
+          ),
+      ],
+    );
+  }
+}
+
+/// A hand tapping on a slow loop: press in, ripple out, lift, pause. The hand
+/// scales about its fingertip so the finger stays on target, and everything
+/// holds still when animations are switched off.
+class _HandTouch extends StatefulWidget {
+  const _HandTouch({required this.motion});
+
+  final AppMotion motion;
+
+  @override
+  State<_HandTouch> createState() => _HandTouchState();
+}
+
+class _HandTouchState extends State<_HandTouch> with SingleTickerProviderStateMixin {
+  static const double _size = 26;
+
+  /// Where the finger lands inside the box — the ripple starts from here.
+  static const Offset _tip = Offset(11, 6);
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1900),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant _HandTouch oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  void _sync() {
+    if (widget.motion.enabled) {
+      if (!_controller.isAnimating) _controller.repeat();
+    } else {
+      _controller.stop();
+      _controller.value = 0;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    return RepaintBoundary(
+      child: SizedBox(
+        width: _size,
+        height: _size,
+        child: AnimatedBuilder(
+          animation: _controller,
+          builder: (context, _) {
+            final v = _controller.value;
+            // 0-.24 press down, .24-.38 held, .38-.62 lift, then a rest.
+            final double press;
+            if (v < 0.24) {
+              press = Curves.easeIn.transform(v / 0.24);
+            } else if (v < 0.38) {
+              press = 1;
+            } else if (v < 0.62) {
+              press = 1 - Curves.easeOut.transform((v - 0.38) / 0.24);
+            } else {
+              press = 0;
+            }
+            // The ripple leaves the fingertip the moment it lands.
+            final ripple = v < 0.24 ? 0.0 : ((v - 0.24) / 0.42).clamp(0.0, 1.0);
+            final ring = 7 + 17 * ripple;
+            return Stack(
+              clipBehavior: Clip.none,
+              children: <Widget>[
+                if (ripple > 0 && ripple < 1)
+                  Positioned(
+                    left: _tip.dx - ring / 2,
+                    top: _tip.dy - ring / 2,
+                    child: Container(
+                      width: ring,
+                      height: ring,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: c.accent.withValues(alpha: 0.6 * (1 - ripple)), width: 1.2),
+                      ),
+                    ),
+                  ),
+                Transform.scale(
+                  scale: 1 - 0.16 * press,
+                  alignment: const Alignment(-0.45, -0.8),
+                  child: Icon(
+                    Icons.touch_app_rounded,
+                    size: 19,
+                    color: c.textPrimary,
+                    shadows: <Shadow>[Shadow(color: c.shadow.withValues(alpha: 0.55), blurRadius: 3)],
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
       ),
     );
   }

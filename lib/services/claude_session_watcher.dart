@@ -59,11 +59,16 @@ class ClaudeSessionWatcher {
         return;
       }
       if (!_everSeen) return;
+      if (!enabled) {
+        // Switched off: don't bank misses that would close the app the moment
+        // the setting is switched back on, and don't latch — a later session
+        // must still be able to close it.
+        _misses = 0;
+        return;
+      }
       if (++_misses < _missesBeforeQuit) return;
       _fired = true;
-      // Still report the close even when the setting is off — the caller
-      // decides what to do with it — but only act on it once.
-      if (enabled) onAllSessionsClosed();
+      onAllSessionsClosed();
     } finally {
       _checking = false;
     }

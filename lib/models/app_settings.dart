@@ -97,9 +97,9 @@ class AppSettings {
   final double? anchorCenterY;
   final bool onboardingSeen;
 
-  /// The first-run attempt to install the status-line bridge has happened.
-  /// Set once, so a user who later removes the bridge on purpose does not get
-  /// it re-installed under them on the next launch.
+  /// The status-line bridge has been installed from the Home screen prompt.
+  /// Set once, so the prompt (and its button next to the Claude Code status)
+  /// never comes back — the bridge is never installed without being asked for.
   final bool bridgeAutoInstallDone;
 
   /// Open the monitor (as the small pill) whenever a Claude Code session starts.

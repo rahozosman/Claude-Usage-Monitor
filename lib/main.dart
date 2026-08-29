@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'app/app.dart';
-import 'core/services/app_paths.dart';
 import 'features/dashboard/usage_controller.dart';
 import 'features/settings/settings_controller.dart';
 import 'features/shell/shell_controller.dart';
@@ -57,14 +56,6 @@ Future<void> main(List<String> args) async {
       // script, which embeds this exe path) in place while the setting is on.
       final bridge = StatusLineBridgeService();
       if (settings.launchWithClaude) unawaited(bridge.ensureLaunchHook());
-
-      // First launch: put the status-line bridge in place instead of making the
-      // user find the button for it — without it the app has no subscription
-      // numbers to show. Attempted once only; both writes to settings.json are
-      // queued inside the service so they cannot clobber each other.
-      if (!settings.bridgeAutoInstallDone) {
-        unawaited(_installBridgeOnFirstRun(bridge, settingsController));
-      }
 
       final cli = ClaudeCliService();
       final oauth = OAuthUsageService();
@@ -151,26 +142,4 @@ Future<void> main(List<String> args) async {
       debugPrint('Uncaught: $error\n$stack');
     },
   );
-}
-
-/// Installs the status-line bridge the first time the app is opened.
-///
-/// The bridge is what feeds the official `rate_limits` block into the monitor,
-/// so a fresh install has nothing to show until it is in place. It preserves
-/// any status line the user already had (forwarding to it) and backs up
-/// `settings.json` first, so this is safe to do unprompted.
-///
-/// The flag is only set once the install succeeds: if Claude Code is not on
-/// this machine yet, or its settings file is temporarily unreadable, the next
-/// launch tries again rather than giving up for good.
-Future<void> _installBridgeOnFirstRun(StatusLineBridgeService bridge, SettingsController settings) async {
-  try {
-    // Nothing to attach to if Claude Code has never run here — don't create a
-    // stray ~/.claude for an app that isn't installed.
-    if (!await Directory(AppPaths.claudeConfigDir).exists()) return;
-    await bridge.install();
-    await settings.update((s) => s.copyWith(bridgeAutoInstallDone: true));
-  } catch (e) {
-    debugPrint('First-run bridge install failed: ${e.runtimeType}');
-  }
 }

@@ -182,14 +182,28 @@ class ShellController extends ChangeNotifier {
   /// still offers Hide for keeping it around invisibly).
   Future<void> close() => quit();
 
+  /// Tears the shell down and ends the process.
+  ///
+  /// Every step is bounded: `try`/`finally` does not rescue a plugin call whose
+  /// future simply never completes, and both teardown calls cross a platform
+  /// channel into a window that is being destroyed underneath them. Left
+  /// unbounded, one stalled reply would strand the app on screen instead of
+  /// closing it — which is exactly what must not happen when the last Claude
+  /// Code session goes. Cleanup is best-effort; exiting is not.
   Future<void> quit() async {
+    const step = Duration(seconds: 3);
     try {
-      await _tray?.destroy();
-      _window.dispose();
-      await _window.destroy();
-    } finally {
-      exit(0);
+      await _tray?.destroy().timeout(step);
+    } catch (e) {
+      debugPrint('Tray teardown skipped: ${e.runtimeType}');
     }
+    try {
+      _window.dispose();
+      await _window.destroy().timeout(step);
+    } catch (e) {
+      debugPrint('Window teardown skipped: ${e.runtimeType}');
+    }
+    exit(0);
   }
 
   @override
