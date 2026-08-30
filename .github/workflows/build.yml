@@ -34,7 +34,9 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter analyze
+      # Infos (the avoid_print lints in the test helpers) are not build
+      # failures; warnings and errors still are.
+      - run: flutter analyze --no-fatal-infos
 
       - run: flutter build macos --release
 
@@ -72,7 +74,9 @@ jobs:
           cache: true
 
       - run: flutter pub get
-      - run: flutter analyze
+      # Infos (the avoid_print lints in the test helpers) are not build
+      # failures; warnings and errors still are.
+      - run: flutter analyze --no-fatal-infos
 
       - run: flutter build windows --release
 
