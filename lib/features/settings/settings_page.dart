@@ -198,6 +198,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     SettingRow(
+                      title: 'Show pace (how fast you\'re using it)',
+                      subtitle: 'Rate, projection and the last 7 days, from the readings this PC recorded.',
+                      trailing: _Toggle(
+                        value: s.showPace,
+                        onChanged: (v) => sc.update((x) => x.copyWith(showPace: v)),
+                      ),
+                    ),
+                    SettingRow(
                       title: 'Show activity (what used it)',
                       subtitle: 'Local Claude Code sessions, tasks and token counts on this PC.',
                       trailing: _Toggle(

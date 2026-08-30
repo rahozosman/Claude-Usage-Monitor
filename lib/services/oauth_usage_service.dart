@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import '../core/constants/app_constants.dart';
 import '../core/errors/app_error.dart';
+import '../core/utils/server_time.dart';
 import '../models/limit_window.dart';
 
 /// Result of one call to the Claude usage endpoint.
@@ -118,7 +119,7 @@ class OAuthUsageService {
         id: id,
         label: LimitWindow.labelFor(id),
         usedPercentage: util.toDouble(),
-        resetsAt: _parseReset(value['resets_at']),
+        resetsAt: ServerTime.parse(value['resets_at']),
         observedAt: now,
         source: DataSource.usageEndpoint,
       ));
@@ -128,15 +129,6 @@ class OAuthUsageService {
       throw AppError.malformed('usage endpoint returned no usage windows');
     }
     return UsageEndpointResult(windows: windows, observedAt: now, extraUsage: extra);
-  }
-
-  static DateTime? _parseReset(Object? v) {
-    if (v is String) return DateTime.tryParse(v)?.toLocal();
-    if (v is num) {
-      final ms = v > 1e12 ? v.toInt() : (v * 1000).round();
-      return DateTime.fromMillisecondsSinceEpoch(ms, isUtc: true).toLocal();
-    }
-    return null;
   }
 
   static String? _errorMessage(String body) {

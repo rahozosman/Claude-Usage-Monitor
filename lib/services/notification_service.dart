@@ -18,6 +18,10 @@ class NotificationService {
   late Map<String, dynamic> _state;
   bool _ready = false;
 
+  /// Whether the system actually accepted us as a notifier. False means
+  /// the setting can be on while nothing will ever be delivered.
+  bool get ready => _ready;
+
   Future<void> init() async {
     _state = _settings.loadNotificationState();
     try {
@@ -36,8 +40,11 @@ class NotificationService {
   /// Threshold notifications for the current snapshot.
   Future<void> evaluate(UsageSnapshot snapshot, AppSettings settings) async {
     if (!settings.notificationsEnabled) return;
+    final now = DateTime.now();
     for (final w in <LimitWindow>[snapshot.fiveHour, snapshot.weekly]) {
-      if (!w.isAvailable || w.resetsAt == null) continue;
+      // A closed window's last figure is history. Restoring one at 85% after a
+      // restart must not raise a threshold alert for a window Claude has shut.
+      if (!w.isActive(now) || w.resetsAt == null) continue;
       final key = _key(w);
       final fired = _firedSet(key);
       final used = w.usedPercentage!;
@@ -97,11 +104,7 @@ class NotificationService {
     return <String>{};
   }
 
-  String _short(LimitWindow w) => w.id == LimitWindow.fiveHourId
-      ? '5-hour'
-      : w.id == LimitWindow.sevenDayId
-          ? 'weekly'
-          : w.label.toLowerCase();
+  String _short(LimitWindow w) => LimitWindow.spanFor(w.id);
 
   String _when(DateTime at) {
     final d = at.difference(DateTime.now());

@@ -31,6 +31,11 @@ class AppPaths {
   static String get bridgeConfig => p.join(bridgeDir, AppConstants.bridgeConfigName);
   static String get bridgeForward => p.join(bridgeDir, AppConstants.bridgeForwardName);
   static String get launchHookScript => p.join(appDataDir, AppConstants.launchHookScriptName);
+  /// This machine's stable sync identity (see DeviceSyncService).
+  /// Appended record of every percentage Claude reported (see
+  /// UsageHistoryService). One JSON object per line.
+  static String get historyFile => p.join(appDataDir, 'history.jsonl');
+  static String get deviceIdFile => p.join(appDataDir, 'device-id');
   static String get backupsDir => p.join(appDataDir, 'backups');
   static String get instanceLockFile => p.join(appDataDir, 'instance.lock');
   static String get wakeFile => p.join(appDataDir, 'wake');

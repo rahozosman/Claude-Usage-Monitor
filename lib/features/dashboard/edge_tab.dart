@@ -35,22 +35,25 @@ class _EdgeTabState extends State<EdgeTab> {
     final c = context.colors;
     final snap = usage.snapshot;
 
-    // The tightest of the two subscription windows drives the sliver.
-    LimitWindow? worst;
-    for (final w in <LimitWindow>[snap.fiveHour, snap.weekly]) {
-      if (!w.isAvailable) continue;
-      if (worst == null || (w.usedPercentage ?? 0) > (worst.usedPercentage ?? 0)) worst = w;
-    }
-    final status = worst == null ? UsageStatus.unknown : worst.status;
-    final level = worst?.usedPercentage;
-
     return ValueListenableBuilder<DateTime>(
       valueListenable: usage.clock,
       builder: (context, now, _) {
+        // The tightest of the two subscription windows drives the sliver.
+        // A closed window is skipped: its last figure is history, and the
+        // sliver would otherwise sit at a level nothing is measuring.
+        LimitWindow? worst;
+        for (final w in <LimitWindow>[snap.fiveHour, snap.weekly]) {
+          if (!w.isActive(now)) continue;
+          if (worst == null || (w.usedPercentage ?? 0) > (worst.usedPercentage ?? 0)) worst = w;
+        }
+        final status = worst == null ? UsageStatus.unknown : worst.status;
+        final level = worst?.usedPercentage;
+
+        String share(LimitWindow w, String of) =>
+            w.isActive(now) ? '${FormatUtils.percent(w.usedPercentage)} of $of' : LimitWindow.noActiveWindow(w.id);
         final tooltip = worst == null
             ? 'Claude usage — click to open'
-            : '${FormatUtils.percent(snap.fiveHour.usedPercentage)} of 5 hours · '
-                  '${FormatUtils.percent(snap.weekly.usedPercentage)} of the week\nClick to open';
+            : '${share(snap.fiveHour, '5 hours')} · ${share(snap.weekly, 'the week')}\nClick to open';
 
         return Tooltip(
           message: tooltip,

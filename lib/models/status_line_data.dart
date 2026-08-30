@@ -1,3 +1,4 @@
+import '../core/utils/server_time.dart';
 import 'limit_window.dart';
 
 /// Parsed contents of the status-line JSON that Claude Code hands to its
@@ -23,6 +24,17 @@ class StatusLineData {
 
   bool get hasRateLimits => windows.isNotEmpty;
 
+  /// The window ids this status line actually carried.
+  ///
+  /// Claude Code drops a window out of `rate_limits` entirely once it is no
+  /// longer open — a payload with `seven_day` and no `five_hour` is normal,
+  /// not broken — so "did the feed carry this window?" has to be asked per
+  /// id. [hasRateLimits] answers it for the block as a whole and
+  /// would call that payload complete.
+  List<String> get windowIds => <String>[for (final w in windows) w.id];
+
+  bool reported(String id) => windows.any((w) => w.id == id);
+
   /// Tolerant parser — every field is optional per the Claude Code docs.
   static StatusLineData fromJson(Map<String, dynamic> json, DateTime observedAt) {
     final windows = <LimitWindow>[];
@@ -37,9 +49,8 @@ class StatusLineData {
           id: key.toString(),
           label: LimitWindow.labelFor(key.toString()),
           usedPercentage: used.toDouble(),
-          resetsAt: reset is num
-              ? DateTime.fromMillisecondsSinceEpoch((reset * 1000).round(), isUtc: true).toLocal()
-              : (reset is String ? DateTime.tryParse(reset)?.toLocal() : null),
+          // Straight from Claude Code's own JSON, never derived.
+          resetsAt: ServerTime.parse(reset),
           observedAt: observedAt,
           source: DataSource.statusLine,
         ));

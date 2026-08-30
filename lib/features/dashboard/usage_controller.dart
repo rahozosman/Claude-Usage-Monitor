@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../../core/errors/app_error.dart';
 import '../../models/connection_status.dart';
 import '../../models/limit_window.dart';
+import '../../models/usage_series.dart';
 import '../../models/usage_snapshot.dart';
 import '../../repositories/usage_repository.dart';
 import '../../services/notification_service.dart';
@@ -56,6 +57,10 @@ class UsageController extends ChangeNotifier {
   bool get apiConfigured => _repo.apiConfigured;
   bool get adminConfigured => _repo.adminConfigured;
   bool get localScanning => _repo.localScanning;
+
+  /// Recorded observations behind the pace card. Changes only on a
+  /// refresh, which already notifies listeners.
+  UsageHistory get history => _repo.history;
 
   AppError? get primaryError => _snapshot.subscriptionError ?? _snapshot.apiError;
 

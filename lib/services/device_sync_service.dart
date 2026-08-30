@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -20,6 +21,7 @@ import '../models/session_usage.dart';
 class DeviceSyncService {
   DateTime? _lastPublish;
   String? _lastFingerprint;
+  String? _deviceId;
 
   /// Near-real-time: republish on this cadence, and immediately whenever the
   /// local picture actually changed. The floor is the shared folder's own sync
@@ -30,7 +32,62 @@ class DeviceSyncService {
   /// Every open session is always published; finished ones are capped.
   static const int _maxIdleSessions = 8;
 
-  String get deviceId => Platform.localHostname;
+  /// The machine's name - a label, never an identity.
+  String get deviceName {
+    try {
+      final host = Platform.localHostname.trim();
+      if (host.isNotEmpty) return host;
+    } catch (_) {
+      // Some macOS network states make this throw rather than answer.
+    }
+    return 'This device';
+  }
+
+  /// A stable id for this machine, kept next to the app's own files.
+  ///
+  /// The hostname cannot serve as the identity: macOS reports the Bonjour
+  /// name, which flips between `Name.local` and `Name` and changes with the
+  /// network or a rename. Keyed on that, one Mac publishes under two file
+  /// names and then lists *itself* as another device for a month. The id is
+  /// generated once and never changes; the hostname is still published, as a
+  /// label the user recognises.
+  Future<String> _resolveDeviceId() async {
+    final cached = _deviceId;
+    if (cached != null) return cached;
+    final file = File(AppPaths.deviceIdFile);
+    try {
+      if (await file.exists()) {
+        final existing = _fileSafe(await file.readAsString());
+        if (existing.isNotEmpty) return _deviceId = existing;
+      }
+    } catch (_) {
+      // Unreadable: fall through and mint a new one.
+    }
+    final random = Random.secure();
+    final generated = _fileSafe(
+      List<int>.generate(8, (_) => random.nextInt(256)).map((b) => b.toRadixString(16).padLeft(2, '0')).join(),
+    );
+    try {
+      await AppPaths.ensureAppDataDir();
+      await file.writeAsString(generated);
+    } catch (_) {
+      // Still usable for this run, just not stable across restarts.
+    }
+    return _deviceId = generated;
+  }
+
+  /// The id ends up in a file name, so it may only ever be plain characters.
+  static String _fileSafe(String value) {
+    final cleaned = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '');
+    return cleaned.length > 64 ? cleaned.substring(0, 64) : cleaned;
+  }
+
+  /// Hostnames are compared with the macOS `.local` suffix removed, so the
+  /// same Mac seen under both spellings is still recognised as this machine.
+  static String _normalizeName(String value) {
+    final lower = value.trim().toLowerCase();
+    return lower.endsWith('.local') ? lower.substring(0, lower.length - 6) : lower;
+  }
 
   /// The folder to use: the user's own choice, else a synced cloud folder.
   String? resolveFolder(AppSettings settings) {
@@ -80,18 +137,57 @@ class DeviceSyncService {
     required DateTime now,
   }) async {
     final folder = resolveFolder(settings);
-    if (!settings.deviceSyncEnabled) return DeviceSyncResult(folder: folder, enabled: false);
-    if (folder == null) return const DeviceSyncResult();
+    final name = deviceName;
+    if (!settings.deviceSyncEnabled) {
+      return DeviceSyncResult(folder: folder, enabled: false, thisDeviceName: name);
+    }
+    if (folder == null) return DeviceSyncResult(thisDeviceName: name);
+
+    final id = await _resolveDeviceId();
+    final dir = Directory(folder);
+    try {
+      await dir.create(recursive: true);
+    } catch (e) {
+      debugPrint('Device folder unavailable: ${e.runtimeType}');
+      return DeviceSyncResult(
+        folder: folder,
+        thisDeviceName: name,
+        error: 'Could not open the shared folder (${e.runtimeType}). Check that it exists and is not offline.',
+      );
+    }
+
+    // Publishing and reading are deliberately kept apart. A cloud client
+    // holding our own file open is routine and transient, and it must not
+    // cost the user every other device's report - which was readable the
+    // whole time it was happening.
+    String? publishError;
+    if (local != null) {
+      try {
+        await _publish(dir, id, name, local, now);
+      } catch (e) {
+        debugPrint('Device publish failed: ${e.runtimeType}');
+        publishError = 'This device could not publish just now (${e.runtimeType}) - it retries on the next pass.';
+      }
+    }
 
     try {
-      final dir = Directory(folder);
-      await dir.create(recursive: true);
-      if (local != null) await _publish(dir, local, now);
-      final devices = await _readOthers(dir, now);
-      return DeviceSyncResult(folder: folder, devices: devices);
+      final devices = await _readOthers(dir, id, name, now);
+      return DeviceSyncResult(
+        folder: folder,
+        devices: devices,
+        thisDeviceName: name,
+        publishedAt: _lastPublish,
+        publishError: publishError,
+      );
     } catch (e) {
       debugPrint('Device sync failed: ${e.runtimeType}');
-      return DeviceSyncResult(folder: folder, error: 'Could not read the shared folder (${e.runtimeType}).');
+      return DeviceSyncResult(
+        folder: folder,
+        thisDeviceName: name,
+        publishedAt: _lastPublish,
+        publishError: publishError,
+        error: 'Could not read the shared folder (${e.runtimeType}).',
+      );
     }
   }
 
@@ -106,7 +202,7 @@ class DeviceSyncService {
     return parts.join('|');
   }
 
-  Future<void> _publish(Directory dir, LocalUsageReport local, DateTime now) async {
+  Future<void> _publish(Directory dir, String id, String name, LocalUsageReport local, DateTime now) async {
     final last = _lastPublish;
     final fingerprint = _fingerprint(local);
     final changed = fingerprint != _lastFingerprint;
@@ -120,8 +216,8 @@ class DeviceSyncService {
     ];
 
     final me = DeviceActivity(
-      deviceId: deviceId,
-      name: deviceId,
+      deviceId: id,
+      name: name,
       user: Platform.environment['USERNAME'] ?? Platform.environment['USER'],
       platform: Platform.operatingSystem,
       updatedAt: now.toUtc(),
@@ -147,25 +243,43 @@ class DeviceSyncService {
           .toList(),
     );
 
-    final target = File(p.join(dir.path, '$deviceId.json'));
+    final target = File(p.join(dir.path, '$id.json'));
     final tmp = File('${target.path}.$pid.tmp');
-    await tmp.writeAsString(jsonEncode(me.toJson()));
-    await tmp.rename(target.path);
+    try {
+      await tmp.writeAsString(jsonEncode(me.toJson()));
+      await tmp.rename(target.path);
+    } catch (_) {
+      // Never leave a half-written file behind in a folder that syncs: every
+      // other device replicates the litter, and nothing ever expires it.
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {}
+      rethrow;
+    }
     _lastPublish = now;
     _lastFingerprint = fingerprint;
   }
 
-  Future<List<DeviceActivity>> _readOthers(Directory dir, DateTime now) async {
+  Future<List<DeviceActivity>> _readOthers(Directory dir, String id, String name, DateTime now) async {
     final devices = <DeviceActivity>[];
+    final seen = <String>{};
+    final me = _normalizeName(name);
     await for (final entry in dir.list(followLinks: false)) {
       if (entry is! File || p.extension(entry.path).toLowerCase() != '.json') continue;
-      if (p.basenameWithoutExtension(entry.path).toLowerCase() == deviceId.toLowerCase()) continue;
+      final base = p.basenameWithoutExtension(entry.path).toLowerCase();
+      // Ours by file name, or one an older build of this app named after the
+      // hostname, before the id was stable.
+      if (base == id.toLowerCase() || _normalizeName(base) == me) continue;
       try {
         final decoded = jsonDecode(await entry.readAsString());
         if (decoded is! Map<String, dynamic>) continue;
         final device = DeviceActivity.fromJson(decoded);
-        if (device == null || device.deviceId.toLowerCase() == deviceId.toLowerCase()) continue;
+        if (device == null || device.deviceId.toLowerCase() == id.toLowerCase()) continue;
+        // The same machine reporting under a previous identity: showing the
+        // user their own PC as a second device is worse than showing nothing.
+        if (_normalizeName(device.name) == me) continue;
         if (now.toUtc().difference(device.updatedAt) > _forgetAfter) continue;
+        if (!seen.add(device.deviceId.toLowerCase())) continue;
         devices.add(device);
       } catch (_) {
         // A half-synced or foreign file: skip it, never fail the refresh.

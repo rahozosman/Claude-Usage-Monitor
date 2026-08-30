@@ -1,3 +1,4 @@
+import '../core/utils/server_time.dart';
 import '../core/utils/usage_math.dart';
 
 /// One limiter parsed from `anthropic-ratelimit-<name>-{limit,remaining,reset}`.
@@ -110,8 +111,6 @@ class ApiRateLimits {
 
   static int? _int(String? v) => v == null ? null : int.tryParse(v.trim());
 
-  static DateTime? _date(String? v) {
-    if (v == null) return null;
-    return DateTime.tryParse(v.trim())?.toLocal();
-  }
+  /// The reset instant Anthropic put in the header, parsed as sent.
+  static DateTime? _date(String? v) => ServerTime.parse(v);
 }

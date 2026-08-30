@@ -26,6 +26,8 @@ import '../../widgets/status_indicator.dart';
 import '../../widgets/usage_card.dart';
 import '../settings/settings_controller.dart';
 import '../shell/shell_controller.dart';
+import 'health_card.dart';
+import 'pace_card.dart';
 import 'usage_controller.dart';
 
 /// Expanded dashboard: header, cards, footer.
@@ -77,6 +79,9 @@ class DashboardPage extends StatelessWidget {
           showCountdown: settings.showCountdown,
           opacity: settings.transparency,
         ),
+      // Directly under the gauges it describes: a percentage with no
+      // direction is what this card exists to give direction to.
+      if (settings.showPace) PaceCard(snapshot: snap, opacity: settings.transparency),
       for (final w in snap.extraWindows)
         if (w.isAvailable)
           UsageCard(
@@ -95,9 +100,12 @@ class DashboardPage extends StatelessWidget {
           clock: usage.clock,
           opacity: settings.transparency,
         ),
-      if (settings.showActivity)
+      // Shown whenever sharing is on, even with the activity card hidden: this
+      // device keeps publishing either way, so the exchange stays visible.
+      if (settings.showActivity || settings.deviceSyncEnabled)
         DevicesCard(result: snap.devices, motion: motion, clock: usage.clock, opacity: settings.transparency),
       _CliCard(cli: snap.cli, snapshot: snap, opacity: settings.transparency),
+      HealthCard(snapshot: snap, motion: motion, clock: usage.clock, opacity: settings.transparency),
       AboutCard(motion: motion, opacity: settings.transparency),
     ];
 
@@ -288,9 +296,9 @@ class _CliCard extends StatefulWidget {
 }
 
 class _CliCardState extends State<_CliCard> {
-  /// The bridge is never put in place behind the user's back: the button next
-  /// to the status opens this confirmation, and only a deliberate "Install"
-  /// writes to `~/.claude/settings.json`.
+  /// The fallback for when the first-launch install could not run (a malformed
+  /// `settings.json`, a locked file): the button next to the status opens this
+  /// confirmation, and "Install" retries the write to `~/.claude/settings.json`.
   bool _asking = false;
   bool _busy = false;
   String? _error;

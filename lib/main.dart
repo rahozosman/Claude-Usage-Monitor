@@ -21,6 +21,7 @@ import 'services/settings_service.dart';
 import 'services/startup_service.dart';
 import 'services/statusline_bridge_service.dart';
 import 'services/tray_service.dart';
+import 'services/usage_history_service.dart';
 import 'services/window_service.dart';
 
 Future<void> main(List<String> args) async {
@@ -57,6 +58,10 @@ Future<void> main(List<String> args) async {
       final bridge = StatusLineBridgeService();
       if (settings.launchWithClaude) unawaited(bridge.ensureLaunchHook());
 
+      // Loaded and pruned once, before the first refresh can append to it.
+      final history = UsageHistoryService();
+      await history.init();
+
       final cli = ClaudeCliService();
       final oauth = OAuthUsageService();
       final api = AnthropicApiService();
@@ -66,6 +71,7 @@ Future<void> main(List<String> args) async {
         api: api,
         settingsService: settingsService,
         local: LocalUsageService(),
+        history: history,
       );
 
       final notifications = NotificationService(settingsService);
@@ -124,6 +130,26 @@ Future<void> main(List<String> args) async {
       shell.attachTray(tray);
 
       usage.start();
+
+      // The status-line bridge is the only source of subscription limits, so
+      // the first launch installs it instead of leaving every window reading
+      // "Unavailable" until the user finds the button. Any status line already
+      // configured is preserved (the bridge forwards to it) and settings.json
+      // is backed up first. Later launches only repair an install still in
+      // place, so removing it from Settings sticks.
+      unawaited(() async {
+        final firstRun = !settings.bridgeAutoInstallDone;
+        if (!await bridge.ensureBridge(autoInstall: firstRun)) return;
+        // Spent only on success: a launch before Claude Code was installed, or
+        // one that could not write the file, retries on the next one instead
+        // of leaving the app permanently without a source.
+        if (firstRun) {
+          await settingsController.update((s) => s.copyWith(bridgeAutoInstallDone: true));
+        }
+        // Picks the bridge up straight away rather than after the CLI-detect
+        // cache expires, so the panels change over on this launch.
+        await usage.refresh(force: true);
+      }());
 
       runApp(
         MultiProvider(

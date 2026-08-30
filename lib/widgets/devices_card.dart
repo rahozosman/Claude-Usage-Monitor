@@ -71,6 +71,10 @@ class DevicesCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: AppDimens.s10),
+              if (result.enabled && result.folder != null) ...<Widget>[
+                _ThisDevice(result: result, now: now),
+                const SizedBox(height: AppDimens.s10),
+              ],
               if (!result.enabled)
                 _Note('Sharing is off. Turn on "Share activity with my other devices" in Settings → Activity.')
               else if (result.folder == null)
@@ -100,6 +104,49 @@ class DevicesCard extends StatelessWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// This machine's own end of the exchange.
+///
+/// Without it the card can only say what it did not find, and a folder that
+/// is not syncing is indistinguishable from another PC that was never
+/// started. The resolved path is shown too, because the default differs per
+/// platform (OneDrive on Windows, iCloud Drive on a Mac without OneDrive) and
+/// two machines pointing at different folders is the likeliest reason this
+/// section stays empty.
+class _ThisDevice extends StatelessWidget {
+  const _ThisDevice({required this.result, required this.now});
+
+  final DeviceSyncResult result;
+  final DateTime now;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.colors;
+    final t = Theme.of(context).textTheme;
+    final failed = result.publishError != null;
+    final state = failed
+        ? result.publishError!
+        : result.publishedAt == null
+        ? 'waiting to publish'
+        : 'published ${FormatUtils.relative(result.publishedAt, now)}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          'This device · ${result.thisDeviceName ?? 'unknown'} — $state',
+          style: t.bodySmall?.copyWith(color: failed ? c.statusWarning : c.textSecondary),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          result.folder!,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: t.bodySmall?.copyWith(color: c.textTertiary, fontSize: 11),
+        ),
+      ],
     );
   }
 }

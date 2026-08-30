@@ -48,6 +48,7 @@ dependencies:
   package_info_plus: ^9.0.1
   path: ^1.9.1
   ffi: ^2.1.4
+  msix: ^3.18.0
 
 dev_dependencies:
   flutter_test:
@@ -59,6 +60,23 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+# Microsoft Store package (`dart run msix:create`). identity_name and publisher
+# must match the reservation in Partner Center exactly, and `store: true` leaves
+# the package unsigned — the Store signs it with that publisher itself, so a
+# self-signed test certificate is never accepted.
+msix_config:
+  display_name: Claude Usage Monitor
+  publisher_display_name: rahoz osman
+  identity_name: rahozosman.claudeusagemonitor
+  publisher: CN=74E58D7B-C8D8-4939-83AF-C2EE41E72A19
+  logo_path: assets/icons/app_icon_256.png
+  # The Store requires the fourth part of the version to be 0.
+  msix_version: 1.0.0.0
+  architecture: x64
+  # The app talks to api.anthropic.com; nothing else is needed.
+  capabilities: internetClient
+  store: true
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

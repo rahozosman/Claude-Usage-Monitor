@@ -137,7 +137,7 @@ class _LimitRow extends StatelessWidget {
         final meta = !window.isAvailable
             ? (window.unavailableReason ?? 'Not provided by Claude')
             : reset
-            ? 'Window reset · waiting for new data'
+            ? LimitWindow.noActiveWindow(window.id)
             : <String>[
                 '${FormatUtils.percent(window.remainingPercentage)} left',
                 if (showCountdown && window.resetsAt != null)

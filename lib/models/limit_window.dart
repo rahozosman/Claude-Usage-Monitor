@@ -95,6 +95,14 @@ class LimitWindow {
   bool hasReset(DateTime now) => UsageMath.hasReset(resetsAt, now);
   Duration? untilReset(DateTime now) => UsageMath.untilReset(resetsAt, now);
 
+  /// Whether this window is open right now: Claude is reporting it *and* its
+  /// reset has not passed.
+  ///
+  /// A closed window still carries the last figure Claude gave. That figure is
+  /// history, not a live reading, so this — never [isAvailable] alone — is what
+  /// gates a percentage on screen.
+  bool isActive(DateTime now) => isAvailable && !hasReset(now);
+
   bool isStale(DateTime now, Duration staleAfter) =>
       observedAt != null && now.difference(observedAt!) > staleAfter;
 
@@ -122,6 +130,25 @@ class LimitWindow {
 
   static const String fiveHourId = 'five_hour';
   static const String sevenDayId = 'seven_day';
+
+  /// The window's span on its own, for sentences like "No active 5-hour
+  /// window". [labelFor] is the card title; this is the noun inside a phrase.
+  static String spanFor(String id) {
+    switch (id) {
+      case fiveHourId:
+        return '5-hour';
+      case sevenDayId:
+        return 'weekly';
+      default:
+        return labelFor(id).toLowerCase();
+    }
+  }
+
+  /// The one sentence every surface uses for a window that is not open.
+  ///
+  /// Deliberately not "0%" and not "waiting for new data": Claude has not
+  /// opened this window, so there is no number to show and none is implied.
+  static String noActiveWindow(String id) => 'No active ${spanFor(id)} window';
 
   static String labelFor(String id) {
     switch (id) {

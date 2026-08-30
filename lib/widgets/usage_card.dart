@@ -91,7 +91,7 @@ class UsageCard extends StatelessWidget {
                       child: Text('used', style: t.bodySmall),
                     ),
                   const Spacer(),
-                  if (available && showCountdown)
+                  if (available && !reset && showCountdown)
                     Countdown(
                       resetsAt: window.resetsAt,
                       clock: clock,
@@ -121,7 +121,7 @@ class UsageCard extends StatelessWidget {
   List<Widget> _details(BuildContext context, DateTime now, bool reset, bool stale) {
     final c = context.colors;
     final rows = <(String, String)>[
-      ('Used', reset ? 'Window reset — waiting for new data' : FormatUtils.percent(window.usedPercentage)),
+      ('Used', reset ? LimitWindow.noActiveWindow(window.id) : FormatUtils.percent(window.usedPercentage)),
       ('Remaining', reset ? '—' : FormatUtils.percent(window.remainingPercentage)),
       ('Amount', window.used != null ? FormatUtils.integer(window.used) : 'Not provided by Claude'),
       ('Resets at', FormatUtils.absolute(window.resetsAt, now)),

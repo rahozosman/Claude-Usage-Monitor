@@ -42,6 +42,7 @@ class AppSettings {
     this.showFiveHour = true,
     this.showApi = true,
     this.showWeekly = true,
+    this.showPace = true,
     this.showActivity = true,
     this.showPercentages = true,
     this.showCountdown = true,
@@ -79,6 +80,9 @@ class AppSettings {
   final bool showApi;
   final bool showWeekly;
 
+  /// The pace card: rate, projection and the 7-day peaks.
+  final bool showPace;
+
   /// Show what consumed usage (local Claude Code sessions on this PC).
   final bool showActivity;
   final bool showPercentages;
@@ -98,8 +102,9 @@ class AppSettings {
   final bool onboardingSeen;
 
   /// The status-line bridge has been installed from the Home screen prompt.
-  /// Set once, so the prompt (and its button next to the Claude Code status)
-  /// never comes back — the bridge is never installed without being asked for.
+  /// Set once the first launch has installed the bridge, so the automatic
+  /// install runs exactly once (an uninstall from Settings stays uninstalled)
+  /// and the offer next to the Claude Code status never comes back.
   final bool bridgeAutoInstallDone;
 
   /// Open the monitor (as the small pill) whenever a Claude Code session starts.
@@ -129,6 +134,7 @@ class AppSettings {
     bool? showFiveHour,
     bool? showApi,
     bool? showWeekly,
+    bool? showPace,
     bool? showActivity,
     bool? showPercentages,
     bool? showCountdown,
@@ -161,6 +167,7 @@ class AppSettings {
       showFiveHour: showFiveHour ?? this.showFiveHour,
       showApi: showApi ?? this.showApi,
       showWeekly: showWeekly ?? this.showWeekly,
+      showPace: showPace ?? this.showPace,
       showActivity: showActivity ?? this.showActivity,
       showPercentages: showPercentages ?? this.showPercentages,
       showCountdown: showCountdown ?? this.showCountdown,
@@ -194,6 +201,7 @@ class AppSettings {
     'showFiveHour': showFiveHour,
     'showApi': showApi,
     'showWeekly': showWeekly,
+    'showPace': showPace,
     'showActivity': showActivity,
     'showPercentages': showPercentages,
     'showCountdown': showCountdown,
@@ -240,6 +248,7 @@ class AppSettings {
       showFiveHour: b('showFiveHour', d.showFiveHour),
       showApi: b('showApi', d.showApi),
       showWeekly: b('showWeekly', d.showWeekly),
+      showPace: b('showPace', d.showPace),
       showActivity: b('showActivity', d.showActivity),
       showPercentages: b('showPercentages', d.showPercentages),
       showCountdown: b('showCountdown', d.showCountdown),

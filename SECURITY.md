@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Anthropic API key | OS‑encrypted secure storage (`flutter_secure_storage`: DPAPI on Windows, Keychain on macOS) **or** `ANTHROPIC_API_KEY` env var (read‑only) | `x-api-key` header on the 1‑token probe |
 | Admin API key | secure storage **or** `ANTHROPIC_ADMIN_KEY` | Admin usage/cost/rate‑limit GETs |
-| Claude Code OAuth token | **not stored by this app.** Read from `~/.claude/.credentials.json` into memory only when the opt‑in usage endpoint is enabled, for the duration of one request | `Authorization: Bearer` on `/api/oauth/usage` |
+| Claude Code OAuth token | **not stored by this app.** Read from `~/.claude/.credentials.json` — or, on macOS, from the login Keychain, where Claude Code keeps it — into memory only when the opt‑in usage endpoint is enabled, for the duration of one request | `Authorization: Bearer` on `/api/oauth/usage` |
 
 Rules enforced in code:
 
@@ -27,6 +27,9 @@ Rules enforced in code:
 
 - `%USERPROFILE%\.claude\settings.json` (or `CLAUDE_CONFIG_DIR`): only `statusLine.command`.
 - `%USERPROFILE%\.claude\.credentials.json`: `subscriptionType`, `rateLimitTier`, `expiresAt`
+- macOS only: whether the login Keychain holds a Claude Code sign-in. Queried for attributes only
+  (`security find-generic-password` without `-w`), so the token is not read and no authorization
+  prompt appears. The secret itself is only ever read for the opt-in usage endpoint above.
   (and `accessToken` only for the opt‑in endpoint, in memory).
 - `%LOCALAPPDATA%\ClaudeUsageMonitor\statusline.json`: JSON produced by the bridge.
 - `claude --version` output.
@@ -43,7 +46,10 @@ Rules enforced in code:
   installs itself **once, on first launch**, so limits work without any setup. That auto-install is
   one-shot: it is recorded in `bridgeAutoInstallDone` and never repeated, so removing the bridge
   yourself is respected and it is not reinstalled behind you. It is skipped entirely when `~/.claude`
-  does not exist. All four writers (bridge install/uninstall, hook install/uninstall) are queued
+  does not exist, and it is retried on the next launch rather than spent, so installing Claude Code
+  later still works. Once the bridge is in place, each launch also repairs it: the script is rewritten
+  and a `statusLine.command` pointing at a path that no longer resolves is corrected (backed up the
+  same way). All four writers (bridge install/uninstall, hook install/uninstall) are queued
   through a single serializer, so two of them can never read-modify-write the file at the same time
   and lose each other's changes.
 - App preferences via SharedPreferences (no secrets).

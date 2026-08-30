@@ -44,9 +44,25 @@ $ErrorActionPreference = 'SilentlyContinue'
 $json = [Console]::In.ReadToEnd()
 $dir = Join-Path $env:LOCALAPPDATA 'ClaudeUsageMonitor'
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
-$tmp = Join-Path $dir ('statusline.' + $PID + '.tmp')
-[IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
-Move-Item -Force -Path $tmp -Destination (Join-Path $dir 'statusline.json')
+# Empty stdin would replace the last good payload with a file the monitor
+# reads as "nothing received yet", so it is not worth storing.
+if (-not [string]::IsNullOrWhiteSpace($json)) {
+  $tmp = Join-Path $dir ('statusline.' + $PID + '.tmp')
+  [IO.File]::WriteAllText($tmp, $json, (New-Object System.Text.UTF8Encoding($false)))
+  # The monitor holds the destination open while it reads it. A move that
+  # loses that race dropped the turn's data silently and left the .tmp
+  # behind, so it is retried before being given up on.
+  for ($i = 0; $i -lt 5; $i++) {
+    Move-Item -Force -Path $tmp -Destination (Join-Path $dir 'statusline.json') -ErrorAction SilentlyContinue
+    if (-not (Test-Path $tmp)) { break }
+    Start-Sleep -Milliseconds 60
+  }
+  Remove-Item -Force -Path $tmp -ErrorAction SilentlyContinue
+  # Strays from an older bridge, or from one that was killed mid-write.
+  Get-ChildItem -Path $dir -Filter 'statusline.*.tmp' -ErrorAction SilentlyContinue |
+    Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-5) } |
+    Remove-Item -Force -ErrorAction SilentlyContinue
+}
 
 $forward = $null
 $cfgPath = Join-Path $dir 'bridge\bridge-config.json'
@@ -83,9 +99,13 @@ if ($forward) {
 dir="$HOME/Library/Application Support/ClaudeUsageMonitor"
 mkdir -p "$dir" 2>/dev/null
 json=$(cat)
-tmp="$dir/statusline.$$.tmp"
-printf '%s' "$json" > "$tmp" 2>/dev/null
-mv -f "$tmp" "$dir/statusline.json" 2>/dev/null
+# Empty stdin would replace the last good payload with a file the monitor
+# reads as "nothing received yet".
+if [ -n "$json" ]; then
+  tmp="$dir/statusline.$$.tmp"
+  printf '%s' "$json" > "$tmp" 2>/dev/null
+  mv -f "$tmp" "$dir/statusline.json" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+fi
 
 fwd="$dir/bridge/forward"
 if [ -s "$fwd" ]; then
@@ -104,8 +124,13 @@ out=""
 exit 0
 ''';
 
-  String get bridgeCommand => Platform.isWindows
-      ? 'powershell -NoProfile -ExecutionPolicy Bypass -File ${AppPaths.forwardSlashes(AppPaths.bridgeScript)}'
+  /// Static so anything that only wants to *check* the recorded command
+  /// against the current one can, without holding a service.
+  static String get bridgeCommand => Platform.isWindows
+      // Quoted: a profile folder with a space in it ("C:/Users/Jane Doe/...")
+      // otherwise splits into two arguments and PowerShell reports a file it
+      // cannot find, leaving the monitor with no data and no visible reason.
+      ? 'powershell -NoProfile -ExecutionPolicy Bypass -File "${AppPaths.forwardSlashes(AppPaths.bridgeScript)}"'
       // The path contains a space on macOS ("Application Support"), and
       // Claude Code runs this through a shell, so it must stay quoted.
       : '/bin/sh "${AppPaths.bridgeScript}"';
@@ -122,17 +147,66 @@ exit 0
     return _isBridge(settings?['statusLine']);
   }
 
+  /// The startup path, so the limits panels have a data source without the
+  /// user having to go looking for a button:
+  ///
+  ///  * `autoInstall` (first launch only) puts the bridge in place, keeping
+  ///    whatever status line was already configured and backing the file up.
+  ///  * Every later launch only *repairs* an install that is still there —
+  ///    rewriting the script and correcting a stale command — so a bridge
+  ///    removed from Settings stays removed.
+  ///
+  /// Never throws; a `settings.json` it cannot parse is left untouched.
+  /// Returns true when the bridge is in `settings.json` afterwards — the
+  /// caller only records the one-shot as spent on a true, so a launch where
+  /// Claude Code was not there yet (or the file was locked) simply tries
+  /// again next time instead of losing the chance for good.
+  Future<bool> ensureBridge({required bool autoInstall}) async {
+    try {
+      if (await isInstalled()) {
+        await install(); // repair only
+        return true;
+      }
+      // Nothing to attach to yet: `~/.claude` appears the first time Claude
+      // Code runs, and writing a settings.json for a CLI that was never
+      // installed would be putting a file in someone's home for nothing.
+      if (!autoInstall || !await Directory(AppPaths.claudeConfigDir).exists()) return false;
+      await install();
+      return true;
+    } catch (e) {
+      debugPrint('Bridge install/repair failed: ${e.runtimeType}');
+      return false;
+    }
+  }
+
   /// Installs the bridge, preserving any status line the user already had.
+  /// Re-running it on an existing install is a repair, not a second install.
   Future<void> install() => _serialized(_install);
 
   Future<void> _install() async {
+    // Written every time: the script is how the app self-heals when the file
+    // was deleted, half-written, or left behind by an older version.
     await Directory(AppPaths.bridgeDir).create(recursive: true);
     await File(AppPaths.bridgeScript)
         .writeAsString(_shellSafe((Platform.isWindows ? _scriptTemplate : _macScriptTemplate).trimLeft()));
 
     final settings = await _readSettings(throwOnMalformed: true) ?? <String, dynamic>{};
     final existing = settings['statusLine'];
-    if (_isBridge(existing)) return; // already installed
+    if (_isBridge(existing)) {
+      // Already ours. Correct the command when it is not the one we would
+      // write now — an older unquoted form, or a path from a moved profile —
+      // so a stale entry can never quietly stop the feed. The forward target
+      // recorded at install time is left alone.
+      final current = Map<String, dynamic>.from(existing as Map);
+      if (current['command'] != bridgeCommand || current['type'] != 'command') {
+        current['type'] = 'command';
+        current['command'] = bridgeCommand;
+        await _backupSettings();
+        settings['statusLine'] = current;
+        await _writeSettings(settings);
+      }
+      return;
+    }
 
     String? forward;
     Object? previous;
@@ -232,7 +306,7 @@ exit 0
 ''';
 
   /// The command Claude Code runs when a session starts or resumes.
-  String get launchHookCommand => Platform.isWindows
+  static String get launchHookCommand => Platform.isWindows
       ? 'powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File '
             '${AppPaths.forwardSlashes(AppPaths.launchHookScript)}'
       : '/bin/sh "${AppPaths.launchHookScript}"';

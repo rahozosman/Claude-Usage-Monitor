@@ -34,7 +34,12 @@ class DeviceActivity {
   final List<DeviceSession> sessions;
 
   /// Its monitor has reported within the last few minutes (sync lag included).
-  bool isOnline(DateTime now) => now.toUtc().difference(updatedAt).abs() <= const Duration(seconds: 120);
+  ///
+  /// A timestamp ahead of ours means that machine's clock runs fast, not that
+  /// it went quiet, so it counts as having just reported. Comparing the
+  /// distance in both directions (the previous behaviour) turned a few
+  /// minutes of ordinary clock skew into a device that never looks online.
+  bool isOnline(DateTime now) => now.toUtc().difference(updatedAt) <= const Duration(seconds: 120);
 
   /// Sessions that device reported as open right now.
   List<DeviceSession> openSessions(DateTime now) =>
@@ -160,13 +165,33 @@ class DeviceSession {
 
 /// Outcome of one sync pass: where we looked and what the other devices said.
 class DeviceSyncResult {
-  const DeviceSyncResult({this.folder, this.devices = const <DeviceActivity>[], this.error, this.enabled = true});
+  const DeviceSyncResult({
+    this.folder,
+    this.devices = const <DeviceActivity>[],
+    this.error,
+    this.enabled = true,
+    this.thisDeviceName,
+    this.publishedAt,
+    this.publishError,
+  });
 
   /// Resolved shared folder, or null when none is configured/available.
   final String? folder;
   final List<DeviceActivity> devices;
+
+  /// Reading the folder failed. The other devices are unknown this pass.
   final String? error;
   final bool enabled;
+
+  /// This machine, so the card can show that it is holding up its own end.
+  final String? thisDeviceName;
+
+  /// When this device last wrote its own file, null until it has.
+  final DateTime? publishedAt;
+
+  /// Writing our file failed while reading others still worked — kept apart
+  /// from [error] because the two have completely different consequences.
+  final String? publishError;
 
   static const DeviceSyncResult none = DeviceSyncResult();
 
