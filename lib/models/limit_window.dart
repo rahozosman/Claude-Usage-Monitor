@@ -128,6 +128,17 @@ class LimitWindow {
     );
   }
 
+  /// Whether a figure Claude gave earlier still says something true about now.
+  ///
+  /// Inside the window it measured it *is* the current figure. Past its reset
+  /// it is only context, and a day is as far as that stretches — the card
+  /// shows it as a closed window, never as a live number.
+  static bool stillDescribesNow(DateTime? resetsAt, DateTime? observedAt, DateTime now) {
+    if (resetsAt != null && resetsAt.isAfter(now)) return true;
+    if (observedAt == null) return false;
+    return now.difference(observedAt) <= const Duration(hours: 24);
+  }
+
   static const String fiveHourId = 'five_hour';
   static const String sevenDayId = 'seven_day';
 

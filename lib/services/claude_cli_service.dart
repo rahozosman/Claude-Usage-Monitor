@@ -287,9 +287,21 @@ class ClaudeCliService {
     return false;
   }
 
+  /// The live status line, with the last reported limits filled in when the
+  /// live payload carries none — see [StatusLineData.mergeKeptLimits] for why
+  /// a perfectly healthy status line often has no `rate_limits` in it.
   Future<StatusLineData?> readStatusLineFile() async {
+    final live = await _readStatusLineAt(AppPaths.statusLineFile);
+    if (live != null && live.hasRateLimits) return live;
+    final kept = await _readStatusLineAt(AppPaths.statusLineLimitsFile);
+    return StatusLineData.mergeKeptLimits(live, kept, DateTime.now());
+  }
+
+  /// Windows are stamped with the file's own mtime: that is when the bridge
+  /// wrote what Claude Code said, which is the only observation time there is.
+  Future<StatusLineData?> _readStatusLineAt(String path) async {
     try {
-      final file = File(AppPaths.statusLineFile);
+      final file = File(path);
       if (!await file.exists()) return null;
       final stat = await file.stat();
       final text = await file.readAsString();
@@ -298,7 +310,7 @@ class ClaudeCliService {
       if (decoded is! Map<String, dynamic>) return null;
       return StatusLineData.fromJson(decoded, stat.modified);
     } catch (e) {
-      debugPrint('statusline.json unreadable: ${e.runtimeType}');
+      debugPrint('${p.basename(path)} unreadable: ${e.runtimeType}');
       return null;
     }
   }

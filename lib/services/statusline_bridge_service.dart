@@ -58,8 +58,24 @@ if (-not [string]::IsNullOrWhiteSpace($json)) {
     Start-Sleep -Milliseconds 60
   }
   Remove-Item -Force -Path $tmp -ErrorAction SilentlyContinue
+  # Claude Code leaves rate_limits out of the status line until the session has
+  # had an API response carrying the limit headers, and every session writes to
+  # this one file. A session that has just started would otherwise erase the
+  # numbers another session reported seconds ago, so the last payload that did
+  # carry limits is kept beside the live one. The monitor reads it at its own
+  # timestamp, so a carried figure never looks fresher than it is.
+  if ($json -match '"rate_limits"\s*:\s*\{\s*"') {
+    $ltmp = Join-Path $dir ('statusline-limits.' + $PID + '.tmp')
+    [IO.File]::WriteAllText($ltmp, $json, (New-Object System.Text.UTF8Encoding($false)))
+    for ($i = 0; $i -lt 5; $i++) {
+      Move-Item -Force -Path $ltmp -Destination (Join-Path $dir 'statusline-limits.json') -ErrorAction SilentlyContinue
+      if (-not (Test-Path $ltmp)) { break }
+      Start-Sleep -Milliseconds 60
+    }
+    Remove-Item -Force -Path $ltmp -ErrorAction SilentlyContinue
+  }
   # Strays from an older bridge, or from one that was killed mid-write.
-  Get-ChildItem -Path $dir -Filter 'statusline.*.tmp' -ErrorAction SilentlyContinue |
+  Get-ChildItem -Path $dir -Filter 'statusline*.tmp' -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -lt (Get-Date).AddMinutes(-5) } |
     Remove-Item -Force -ErrorAction SilentlyContinue
 }
@@ -105,6 +121,16 @@ if [ -n "$json" ]; then
   tmp="$dir/statusline.$$.tmp"
   printf '%s' "$json" > "$tmp" 2>/dev/null
   mv -f "$tmp" "$dir/statusline.json" 2>/dev/null || rm -f "$tmp" 2>/dev/null
+  # Claude Code leaves rate_limits out until the session has had an API
+  # response, and every session writes to this one file, so a session that has
+  # just started would erase what another reported seconds ago. The last
+  # payload that did carry limits is kept beside the live one; the monitor
+  # reads it at its own timestamp, so nothing looks fresher than it is.
+  if printf '%s' "$json" | grep -q '"rate_limits"[[:space:]]*:[[:space:]]*{[[:space:]]*"'; then
+    ltmp="$dir/statusline-limits.$$.tmp"
+    printf '%s' "$json" > "$ltmp" 2>/dev/null
+    mv -f "$ltmp" "$dir/statusline-limits.json" 2>/dev/null || rm -f "$ltmp" 2>/dev/null
+  fi
 fi
 
 fwd="$dir/bridge/forward"
@@ -189,6 +215,7 @@ exit 0
     await Directory(AppPaths.bridgeDir).create(recursive: true);
     await File(AppPaths.bridgeScript)
         .writeAsString(_shellSafe((Platform.isWindows ? _scriptTemplate : _macScriptTemplate).trimLeft()));
+    await _seedKeptLimits();
 
     final settings = await _readSettings(throwOnMalformed: true) ?? <String, dynamic>{};
     final existing = settings['statusLine'];
@@ -233,6 +260,29 @@ exit 0
     await _backupSettings();
     settings['statusLine'] = <String, dynamic>{'type': 'command', 'command': bridgeCommand, 'padding': ?padding};
     await _writeSettings(settings);
+  }
+
+  /// Fills in the kept-limits file from the live payload, once.
+  ///
+  /// A bridge that has only ever run under the older script has no kept copy,
+  /// so the first session to start after this update would still erase the
+  /// numbers on disk. Copying carries the live file's timestamp with it, so the
+  /// seeded reading keeps the age it actually has. Only ever fills a gap: a
+  /// kept file that already exists is at least as good and is left alone.
+  Future<void> _seedKeptLimits() async {
+    try {
+      final kept = File(AppPaths.statusLineLimitsFile);
+      if (await kept.exists()) return;
+      final live = File(AppPaths.statusLineFile);
+      if (!await live.exists()) return;
+      final text = await live.readAsString();
+      if (!RegExp(r'"rate_limits"\s*:\s*\{\s*"').hasMatch(text)) return;
+      final observedAt = (await live.stat()).modified;
+      await kept.writeAsString(text);
+      await kept.setLastModified(observedAt);
+    } catch (e) {
+      debugPrint('Seeding the kept status-line limits failed: ${e.runtimeType}');
+    }
   }
 
   /// Removes the bridge and restores the previous status line.

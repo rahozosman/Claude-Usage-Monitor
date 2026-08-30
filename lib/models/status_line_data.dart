@@ -35,6 +35,41 @@ class StatusLineData {
 
   bool reported(String id) => windows.any((w) => w.id == id);
 
+  /// The live payload with [windows] filled in from a payload that had them.
+  ///
+  /// Everything else — model, context, session — stays the live session's, and
+  /// each carried window keeps its own `observedAt`, so nothing reads as
+  /// fresher than it is.
+  StatusLineData withWindows(List<LimitWindow> windows) => StatusLineData(
+        observedAt: observedAt,
+        windows: windows,
+        modelDisplayName: modelDisplayName,
+        contextUsedPercentage: contextUsedPercentage,
+        currentDirectory: currentDirectory,
+        claudeCodeVersion: claudeCodeVersion,
+        sessionId: sessionId,
+      );
+
+  /// Claude Code only puts `rate_limits` in the status line once the session
+  /// has had an API response carrying the limit headers. Until then — and every
+  /// session starts there — the payload is silent about limits, and since every
+  /// session writes to the same file, that silence used to erase what another
+  /// session reported a moment ago: the monitor came up with no live window at
+  /// all and fell back to history that could be hours old.
+  ///
+  /// The bridge keeps the last payload that did carry limits; this merges its
+  /// windows into the live one, dropping any that no longer describe [now].
+  static StatusLineData? mergeKeptLimits(StatusLineData? live, StatusLineData? kept, DateTime now) {
+    if (live != null && live.hasRateLimits) return live;
+    if (kept == null || !kept.hasRateLimits) return live;
+    final windows = <LimitWindow>[
+      for (final w in kept.windows)
+        if (LimitWindow.stillDescribesNow(w.resetsAt, w.observedAt, now)) w,
+    ];
+    if (windows.isEmpty) return live;
+    return (live ?? kept).withWindows(windows);
+  }
+
   /// Tolerant parser — every field is optional per the Claude Code docs.
   static StatusLineData fromJson(Map<String, dynamic> json, DateTime observedAt) {
     final windows = <LimitWindow>[];

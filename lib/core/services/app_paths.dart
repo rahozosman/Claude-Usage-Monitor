@@ -26,6 +26,7 @@ class AppPaths {
       ? p.join(home, 'Library', 'Application Support', AppConstants.localFolderName)
       : p.join(localAppData, AppConstants.localFolderName);
   static String get statusLineFile => p.join(appDataDir, AppConstants.statusLineFileName);
+  static String get statusLineLimitsFile => p.join(appDataDir, AppConstants.statusLineLimitsFileName);
   static String get bridgeDir => p.join(appDataDir, AppConstants.bridgeFolderName);
   static String get bridgeScript => p.join(bridgeDir, AppConstants.bridgeScriptName);
   static String get bridgeConfig => p.join(bridgeDir, AppConstants.bridgeConfigName);

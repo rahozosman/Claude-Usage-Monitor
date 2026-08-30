@@ -34,6 +34,12 @@ class AppConstants {
   // Local bridge files (under %LOCALAPPDATA%\ClaudeUsageMonitor).
   static const String localFolderName = 'ClaudeUsageMonitor';
   static const String statusLineFileName = 'statusline.json';
+  /// The last payload that actually carried a `rate_limits` block, kept beside
+  /// the live one. Every session writes to the same [statusLineFileName], and a
+  /// session renders its status line before it has had an API response — with
+  /// no limits in it — so without this copy one new session erases what another
+  /// reported seconds ago.
+  static const String statusLineLimitsFileName = 'statusline-limits.json';
   static const String bridgeFolderName = 'bridge';
   /// PowerShell on Windows, POSIX sh on macOS — Claude Code runs whatever
   /// `statusLine.command` says, so the script just has to suit the platform.

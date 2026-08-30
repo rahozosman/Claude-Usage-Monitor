@@ -134,7 +134,7 @@ class UsageRepository {
     // the process, so its last percentage never went away.
     for (final prev in previous.allWindows) {
       if (!prev.isAvailable || windows.containsKey(prev.id)) continue;
-      if (!_stillDescribesNow(prev.resetsAt, prev.observedAt, now)) continue;
+      if (!LimitWindow.stillDescribesNow(prev.resetsAt, prev.observedAt, now)) continue;
       windows[prev.id] = prev;
     }
 
@@ -299,18 +299,7 @@ class UsageRepository {
   }
 
   static bool _worthRestoring(UsageReading reading, DateTime now) =>
-      _stillDescribesNow(reading.resetsAt, reading.observedAt, now);
-
-  /// Whether a figure Claude gave earlier still says something true about now.
-  ///
-  /// Inside the window it measured it *is* the current figure. Past its reset
-  /// it is only context, and a day is as far as that stretches — the card
-  /// shows it as a closed window, never as a live number.
-  static bool _stillDescribesNow(DateTime? resetsAt, DateTime? observedAt, DateTime now) {
-    if (resetsAt != null && resetsAt.isAfter(now)) return true;
-    if (observedAt == null) return false;
-    return now.difference(observedAt) <= const Duration(hours: 24);
-  }
+      LimitWindow.stillDescribesNow(reading.resetsAt, reading.observedAt, now);
 
   static String _unavailableReason(
     String id,
