@@ -54,6 +54,45 @@ Warning thresholds are the app's own presentation, not Claude's:
 
 ---
 
+## How fast you're using it
+
+A percentage with no direction cannot tell you whether to keep working. This card gives it one — the
+climb measured over the readings actually taken, and where that pace lands before the window resets.
+
+![The pace card: climb per hour, the week against elapsed time, and the last 7 days](docs/screenshots/08-pace.png)
+
+- **Percent per hour**, measured over the trailing readings, with the span and the number of readings it
+  came from stated beside it — never measured across a reset, so a window opening is not read as usage
+  going backwards
+- **Week used against week elapsed** — 88 % used at 80 % elapsed is *ahead of the week*
+- **The last 7 days**, with each run drawn as its own line: hours the app was not running stay gaps
+  rather than being joined by a straight line through hours nobody observed
+
+A projection is the pace of the readings shown, not a promise, and the card says so on its face.
+
+---
+
+## Today, hour by hour
+
+The gauges say how much is gone and the card below says which sessions spent it. Neither says *when* —
+which is the one thing that tells a steady afternoon apart from twenty minutes that emptied half the
+window.
+
+![The hour-by-hour card with 16:00 clicked open](docs/screenshots/09-hour-by-hour.png)
+
+- **Output tokens only** — what Claude generated. Input and cache are the same conversation re-sent on
+  every turn, so on an hourly scale they track how long a chat has grown rather than what the hour
+  produced
+- **Bar height is the hour's output; bar weight is how many of its 60 minutes carried a response** — so
+  an hour worked through reads bolder than one spent in a single burst, even at the same height
+- **The strip underneath** is how many sessions were in flight in that hour
+- **Click any hour** to focus it: sessions, output tokens, minutes worked and responses, exactly
+
+Minutes worked is a count of minutes that carried a response, not a stopwatch — it cannot see thinking
+time between two answers, and does not pretend to. This PC only, like the card below it.
+
+---
+
 ## What used it, on this PC
 
 Percentages tell you *how much* is gone. This card tells you *what spent it* — read straight from the
@@ -77,6 +116,8 @@ machines are not included.
 The same numbers Claude Code shows in `/usage` → **Overview**, read straight from its own stats cache
 (`~/.claude/stats-cache.json`) — with the days it has not finished counting filled in from the
 transcripts, exactly as `/usage` does, so the card never sits several sessions behind the CLI.
+
+![How you use it: heatmap, totals, favourite model, streaks, the token split and when you work](docs/screenshots/10-stats-over-time.png)
 
 - **All time / 30 days / 7 days**, with everything below recomputed for the range you pick
 - **A contribution heatmap** — one cell per day, shaded by how busy it was; hover for that day's

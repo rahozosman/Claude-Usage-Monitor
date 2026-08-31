@@ -198,9 +198,28 @@ class LocalUsageService {
     final week = <String, int>{};
     final sessions = <SessionUsage>[];
     var todaySessions = 0;
+    // Today's 24 hours, summed across every transcript that spoke in them.
+    final todayPrefix = '${todayKey}T';
+    final outputByHour = List<int>.filled(24, 0);
+    final responsesByHour = List<int>.filled(24, 0);
+    final sessionsByHour = List<int>.filled(24, 0);
+    final minutesByHour = List<int>.filled(24, 0);
 
     for (final st in _files.values) {
       if (st.messages == 0 || st.lastAt == null || st.lastAt!.isBefore(cutoff)) continue;
+      st.hours.forEach((key, bucket) {
+        if (!key.startsWith(todayPrefix)) return;
+        final hour = int.tryParse(key.substring(todayPrefix.length));
+        if (hour == null || hour < 0 || hour > 23) return;
+        outputByHour[hour] += bucket.outputTokens;
+        responsesByHour[hour] += bucket.responses;
+        // OR, not add: a minute two sessions both worked in is one busy minute
+        // of the hour. Counting per session could put 90 minutes in an hour.
+        minutesByHour[hour] |= bucket.minuteMask;
+        // One transcript is one session, counted once for each hour it spoke
+        // in — the same rule the per-day session counts use.
+        sessionsByHour[hour]++;
+      });
       st.dayModelTokens.forEach((day, byModel) {
         final dayDate = UsageStats.parseDay(day);
         if (dayDate == null || dayDate.isBefore(cutoffDay)) return;
@@ -238,6 +257,16 @@ class LocalUsageService {
       activeSessionCount: active.length,
       scannedFiles: scanned,
       dayRollups: _rollups(cutoffDay),
+      todayHours: <HourActivity>[
+        for (var h = 0; h < 24; h++)
+          HourActivity(
+            hour: h,
+            outputTokens: outputByHour[h],
+            responses: responsesByHour[h],
+            sessions: sessionsByHour[h],
+            activeMinutes: _countBits(minutesByHour[h]),
+          ),
+      ],
     );
   }
 
@@ -271,6 +300,24 @@ class LocalUsageService {
     final l = t.toLocal();
     String two(int v) => v.toString().padLeft(2, '0');
     return '${l.year}-${two(l.month)}-${two(l.day)}';
+  }
+
+  /// [_dayKey] plus the local hour: `2026-08-30T17`. Local throughout, so the
+  /// hours are the ones the user lived rather than UTC's.
+  static String _hourKey(DateTime t) {
+    final l = t.toLocal();
+    return '${_dayKey(l)}T${l.hour.toString().padLeft(2, '0')}';
+  }
+
+  /// Set bits in a minute mask — how many of an hour's 60 minutes carried work.
+  static int _countBits(int mask) {
+    var remaining = mask;
+    var count = 0;
+    while (remaining != 0) {
+      remaining &= remaining - 1; // clears the lowest set bit
+      count++;
+    }
+    return count;
   }
 }
 
@@ -313,6 +360,13 @@ class _FileState {
   final Map<String, int> dayMessages = <String, int>{};
   final Map<String, int> dayToolCalls = <String, int>{};
 
+  /// Hour key (`YYYY-MM-DDTHH`, local) → what this transcript spent inside it.
+  ///
+  /// Sparse, like [dayModelTokens]: only hours the session actually spoke in
+  /// get an entry, so a normal transcript holds a handful rather than the 168
+  /// a week has. Its own hours only — the report sums them across sessions.
+  final Map<String, _HourBucket> hours = <String, _HourBucket>{};
+
   void reset() {
     size = 0;
     offset = 0;
@@ -329,6 +383,7 @@ class _FileState {
     dayModelTokens.clear();
     dayMessages.clear();
     dayToolCalls.clear();
+    hours.clear();
   }
 
   void consume(String chunk) {
@@ -409,6 +464,13 @@ class _FileState {
       tokens.cacheWrite += cw;
       tokens.cacheRead += cr;
       tokens.output += out;
+
+      // The hour this response landed in: output tokens only, plus the minute
+      // it happened in. The full four-way split is already kept per day above.
+      final bucket = hours.putIfAbsent(LocalUsageService._hourKey(at), _HourBucket.new);
+      bucket.outputTokens += out;
+      bucket.responses++;
+      bucket.minuteMask |= 1 << at.minute;
     }
   }
 
@@ -464,6 +526,24 @@ class _FileState {
     if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
     return null;
   }
+}
+
+/// Running totals for one clock hour of one transcript.
+class _HourBucket {
+  /// Output only — what Claude generated in the hour. The input and cache
+  /// figures are the same prompt re-sent on every turn, so counting them here
+  /// would make a long conversation look like an hour of furious work.
+  int outputTokens = 0;
+  int responses = 0;
+
+  /// One bit per minute of the hour: bit *n* is set when minute *n* carried a
+  /// response. A count of busy minutes, not a stopwatch — but it is measured,
+  /// which a stopwatch over transcript gaps would not be.
+  ///
+  /// Kept as a mask rather than a count so masks from different sessions can
+  /// be OR-ed together: two sessions answering in the same minute is one busy
+  /// minute of the hour, not two.
+  int minuteMask = 0;
 }
 
 /// Running per-model token counts for one day of one transcript.

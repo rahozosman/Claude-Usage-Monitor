@@ -10,6 +10,7 @@ import '../../core/errors/app_error.dart';
 import '../../core/utils/format_utils.dart';
 import '../../models/cli_status.dart';
 import '../../models/connection_status.dart';
+import '../../models/limit_window.dart';
 import '../../models/usage_snapshot.dart';
 import '../../services/statusline_bridge_service.dart';
 import '../../widgets/about_card.dart';
@@ -19,6 +20,7 @@ import '../../widgets/app_button.dart';
 import '../../widgets/devices_card.dart';
 import '../../widgets/app_icon_button.dart';
 import '../../widgets/glass_panel.dart';
+import '../../widgets/hourly_activity_card.dart';
 import '../../widgets/app_scroll_view.dart';
 import '../../widgets/usage_stats_card.dart';
 import '../../widgets/window_caption.dart';
@@ -83,8 +85,12 @@ class DashboardPage extends StatelessWidget {
       // Directly under the gauges it describes: a percentage with no
       // direction is what this card exists to give direction to.
       if (settings.showPace) PaceCard(snapshot: snap, opacity: settings.transparency),
+      // Only the extra windows this app has a name for (Weekly · Opus and the
+      // like). An undocumented bucket that can say nothing but "0% of
+      // something" is left off rather than given a card — see
+      // LimitWindow.isKnown.
       for (final w in snap.extraWindows)
-        if (w.isAvailable)
+        if (w.isAvailable && LimitWindow.isKnown(w.id))
           UsageCard(
             window: w,
             motion: motion,
@@ -93,6 +99,17 @@ class DashboardPage extends StatelessWidget {
             showCountdown: settings.showCountdown,
             opacity: settings.transparency,
           ),
+      // In their place: the percentages above say how much of the day is gone,
+      // this says which hours of it went. Under the activity toggle because it
+      // reads the same local transcripts that card does.
+      if (settings.showActivity)
+        HourlyActivityCard(
+          report: snap.local,
+          scanning: usage.localScanning,
+          motion: motion,
+          clock: usage.clock,
+          opacity: settings.transparency,
+        ),
       if (settings.showActivity)
         ActivityCard(
           report: snap.local,

@@ -199,6 +199,19 @@ class LimitWindow {
   static String closedWindow(String id, String usedPercent, String ago) =>
       'Last ${spanFor(id)} window: $usedPercent · closed $ago';
 
+  /// Whether this app has a name of its own for [id], rather than a title-cased
+  /// version of whatever key arrived.
+  ///
+  /// The usage endpoint is undocumented and occasionally grows a bucket nobody
+  /// outside Anthropic can explain — 0 % used, no amount, no reset. [labelFor]
+  /// will render it, but a card that can only say "0 % of something" earns no
+  /// slot on Home, so the dashboard draws the windows it understands and lets
+  /// the rest pass silently.
+  static bool isKnown(String id) => switch (id) {
+    fiveHourId || sevenDayId || 'seven_day_opus' || 'seven_day_sonnet' || 'seven_day_oauth_apps' => true,
+    _ => false,
+  };
+
   static String labelFor(String id) {
     switch (id) {
       case fiveHourId:
