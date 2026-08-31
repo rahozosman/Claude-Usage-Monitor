@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import '../core/constants/app_constants.dart';
 import '../core/errors/app_error.dart';
+import '../core/utils/format_utils.dart';
+import '../core/utils/usage_math.dart';
 import '../models/api_rate_limits.dart';
 import '../models/api_usage_report.dart';
 import '../models/app_settings.dart';
@@ -12,8 +14,10 @@ import '../models/session_usage.dart';
 import '../models/status_line_data.dart';
 import '../models/usage_series.dart';
 import '../models/usage_snapshot.dart';
+import '../models/usage_stats.dart';
 import '../services/anthropic_api_service.dart';
 import '../services/claude_cli_service.dart';
+import '../services/claude_stats_service.dart';
 import '../services/device_sync_service.dart';
 import '../services/local_usage_service.dart';
 import '../services/oauth_usage_service.dart';
@@ -35,10 +39,12 @@ class UsageRepository {
     required LocalUsageService local,
     required UsageHistoryService history,
     DeviceSyncService? devices,
+    ClaudeStatsService? stats,
   }) : _cli = cli, // ignore: prefer_initializing_formals
        _history = history, // ignore: prefer_initializing_formals
        _local = local, // ignore: prefer_initializing_formals
        _devices = devices ?? DeviceSyncService(),
+       _stats = stats ?? ClaudeStatsService(),
        _oauth = oauth, // ignore: prefer_initializing_formals
        _api = api, // ignore: prefer_initializing_formals
        _settingsService = settingsService; // ignore: prefer_initializing_formals
@@ -49,6 +55,7 @@ class UsageRepository {
   final SettingsService _settingsService;
   final LocalUsageService _local;
   final DeviceSyncService _devices;
+  final ClaudeStatsService _stats;
   final UsageHistoryService _history;
 
   bool get localScanning => _local.scanning;
@@ -64,11 +71,13 @@ class UsageRepository {
   /// transcripts (incrementally) and exchanges files with the other devices.
   /// It starts no network requests of its own.
   Future<UsageSnapshot> refreshActivity({required AppSettings settings, required UsageSnapshot previous}) async {
+    final now = DateTime.now();
     var local = previous.local;
     // Also scanned for sharing alone: the published file is built from this
     // report, so tying it to the card would make this device go quiet on every
-    // other machine the moment the user hid the card.
-    if (settings.showActivity || settings.deviceSyncEnabled) {
+    // other machine the moment the user hid the card. The stats card needs the
+    // same scan to fill in the days Claude Code has not counted yet.
+    if (settings.showActivity || settings.deviceSyncEnabled || settings.showStats) {
       try {
         local = await _local.scan() ?? local;
       } catch (_) {
@@ -77,11 +86,36 @@ class UsageRepository {
     }
     var devices = previous.devices;
     try {
-      devices = await _devices.sync(settings: settings, local: local, now: DateTime.now());
+      devices = await _devices.sync(settings: settings, local: local, now: now);
     } catch (_) {
       // Best-effort: a folder that is syncing or locked just keeps the old view.
     }
-    return previous.copyWith(local: local, devices: devices);
+    final stats = await _readStats(settings: settings, local: local, previous: previous.stats, now: now);
+    return previous.copyWith(local: local, devices: devices, stats: stats);
+  }
+
+  /// Claude Code's own statistics, brought up to date the way its `/usage`
+  /// screen does it: the file, plus the days since `lastComputedDate` counted
+  /// from the transcripts this app has already read.
+  Future<UsageStats?> _readStats({
+    required AppSettings settings,
+    required LocalUsageReport? local,
+    required UsageStats? previous,
+    required DateTime now,
+  }) async {
+    if (!settings.showStats) return previous;
+    try {
+      final stats = await _stats.read();
+      if (stats == null) return null;
+      return stats.withTranscriptDays(
+        local?.dayRollups ?? const <DayRollup>[],
+        now: now,
+        window: LocalUsageService.window,
+      );
+    } catch (e) {
+      debugPrint('Stats cache read failed: ${e.runtimeType}');
+      return previous;
+    }
   }
 
   Future<UsageSnapshot> fetch({
@@ -156,12 +190,30 @@ class UsageRepository {
       );
     }
 
+    // Too old to show as a figure, but not too old to explain the gap with:
+    // "your last window ended" is a different fact from "nobody is reporting
+    // this", and only the reading on disk can tell them apart.
+    UsageReading? lastReading(String id) {
+      for (final r in _history.lastKnown) {
+        if (r.windowId == id) return r;
+      }
+      return null;
+    }
+
     LimitWindow resolve(String id) =>
         windows.remove(id) ??
         LimitWindow.unavailable(
           id: id,
           label: LimitWindow.labelFor(id),
-          reason: _unavailableReason(id, cliStatus, statusLine, settings, subError),
+          reason: _unavailableReason(
+            id,
+            cliStatus,
+            statusLine,
+            settings,
+            subError,
+            lastReading(id),
+            now,
+          ),
         );
     final fiveHour = resolve(LimitWindow.fiveHourId);
     final weekly = resolve(LimitWindow.sevenDayId);
@@ -219,13 +271,14 @@ class UsageRepository {
     // Also scanned for sharing alone: the published file is built from this
     // report, so tying it to the card would make this device go quiet on every
     // other machine the moment the user hid the card.
-    if (settings.showActivity || settings.deviceSyncEnabled) {
+    if (settings.showActivity || settings.deviceSyncEnabled || settings.showStats) {
       try {
         local = await _local.scan() ?? local;
       } catch (e) {
         // Local transcripts are best-effort; never fail the refresh over them.
       }
     }
+    final stats = await _readStats(settings: settings, local: local, previous: previous.stats, now: now);
 
     // ---- Other devices (shared folder) ----------------------------------------
     var devices = previous.devices;
@@ -279,6 +332,7 @@ class UsageRepository {
       api: apiLimits,
       apiReport: report,
       local: local,
+      stats: stats,
       devices: devices,
       apiError: apiError,
       subscriptionError: subError,
@@ -307,6 +361,8 @@ class UsageRepository {
     StatusLineData? statusLine,
     AppSettings settings,
     AppError? subError,
+    UsageReading? lastKnown,
+    DateTime? now,
   ) {
     if (!cli.installed) {
       return 'Claude Code is not installed — subscription limits unavailable';
@@ -329,6 +385,20 @@ class UsageRepository {
     }
     if (statusLine != null && !statusLine.hasRateLimits) {
       return 'Waiting for Claude Code to report limits — restart your session (Pro/Max plans only)';
+    }
+    // We have seen this window and it is over. That is not the feed failing
+    // to report it — it is the block ending, which is ordinary and which the
+    // branch below would misattribute to Claude Code going quiet.
+    // The credibility rule from LimitWindow.hasCredibleReset applies here too:
+    // a reset that had already passed when the reading was taken is a stale
+    // field, not a closure, and must never be reported as one.
+    final endedAt = lastKnown?.resetsAt;
+    if (now != null &&
+        endedAt != null &&
+        endedAt.isAfter(lastKnown!.observedAt) &&
+        UsageMath.hasReset(endedAt, now)) {
+      return '${LimitWindow.closedWindow(id, FormatUtils.percent(lastKnown.percentage), FormatUtils.relative(endedAt, now))}. '
+          'A new one opens on your next message to Claude.';
     }
     // The feed is healthy and carrying other windows; this one is simply not
     // in it. Claude Code sends a window only while it is open, so the generic

@@ -17,6 +17,10 @@ class AppPaths {
   static String get claudeSettingsFile => p.join(claudeConfigDir, 'settings.json');
   static String get claudeCredentialsFile => p.join(claudeConfigDir, '.credentials.json');
 
+  /// Claude Code's own usage statistics cache — what its `/usage` Overview tab
+  /// is drawn from. Lives beside the config, so `CLAUDE_CONFIG_DIR` moves it.
+  static String get claudeStatsFile => p.join(claudeConfigDir, 'stats-cache.json');
+
   static String get localAppData => Platform.environment['LOCALAPPDATA'] ?? p.join(home, 'AppData', 'Local');
 
   /// Where this app keeps its own files, in the place each OS expects:

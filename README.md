@@ -72,6 +72,26 @@ machines are not included.
 
 ---
 
+## How you use it, over time
+
+The same numbers Claude Code shows in `/usage` → **Overview**, read straight from its own stats cache
+(`~/.claude/stats-cache.json`) — with the days it has not finished counting filled in from the
+transcripts, exactly as `/usage` does, so the card never sits several sessions behind the CLI.
+
+- **All time / 30 days / 7 days**, with everything below recomputed for the range you pick
+- **A contribution heatmap** — one cell per day, shaded by how busy it was; hover for that day's
+  messages, sessions and tokens. A short history is drawn as a row of days rather than an empty year
+- **Total tokens and sessions**, then six facts: favourite model and its share, longest session,
+  active days, longest streak, current streak and your most active day
+- **Input · output · cache read · cache write** as one bar with exact numbers — cache read is
+  typically ~98 % of the total, and the bar shows that rather than hiding it
+- **When you work** — sessions by the hour they started, a histogram Claude Code keeps but never shows
+
+Every figure is one Claude Code wrote, or one counted from the same transcripts it counts. Where a
+figure cannot be had honestly for a range, the card says why instead of interpolating one.
+
+---
+
 ## Other devices, Claude Code status, and About
 
 If you run Claude Code on more than one machine — including a Windows PC and a Mac — each copy of the

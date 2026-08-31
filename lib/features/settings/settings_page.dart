@@ -214,6 +214,16 @@ class _SettingsPageState extends State<SettingsPage> {
                       ),
                     ),
                     SettingRow(
+                      title: 'Show how you use it (activity over time)',
+                      subtitle:
+                          'Days, streaks, sessions and tokens from Claude Code’s own stats cache — the same '
+                          'numbers as its /usage Overview tab.',
+                      trailing: _Toggle(
+                        value: s.showStats,
+                        onChanged: (v) => sc.update((x) => x.copyWith(showStats: v)),
+                      ),
+                    ),
+                    SettingRow(
                       title: 'Share activity with my other devices',
                       subtitle:
                           'Publishes this PC\x27s Claude Code activity (sessions, tokens, models) to a synced folder '

@@ -46,10 +46,12 @@ class OAuthUsageService {
         retryAfter: _backoffUntil!.difference(now),
       );
     }
-    if (!force &&
-        _last != null &&
-        _lastCallAt != null &&
-        now.difference(_lastCallAt!) < AppConstants.usageEndpointMinInterval) {
+    // [force] shortens the interval, it does not remove it: with no floor at
+    // all a held refresh button hammered the endpoint into a 429.
+    final minInterval = force
+        ? AppConstants.usageEndpointForceMinInterval
+        : AppConstants.usageEndpointMinInterval;
+    if (_last != null && _lastCallAt != null && now.difference(_lastCallAt!) < minInterval) {
       return _last!;
     }
 

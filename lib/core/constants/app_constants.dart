@@ -67,6 +67,14 @@ class AppConstants {
   // Freshness / throttling.
   static const Duration staleAfter = Duration(minutes: 10);
   static const Duration usageEndpointMinInterval = Duration(seconds: 60);
+
+  /// The floor a *forced* refresh still respects.
+  ///
+  /// Force used to skip the interval entirely, so holding the refresh button
+  /// put the endpoint under a request every few seconds and earned a 429 —
+  /// which then hid the very numbers the user was reaching for. Manual
+  /// refresh stays responsive; it just cannot turn into a flood.
+  static const Duration usageEndpointForceMinInterval = Duration(seconds: 5);
   static const Duration usageEndpointBackoff = Duration(minutes: 5);
   static const Duration apiProbeMinInterval = Duration(minutes: 1);
   static const Duration cliDetectCacheFor = Duration(minutes: 2);

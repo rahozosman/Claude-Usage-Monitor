@@ -92,8 +92,27 @@ class LimitWindow {
   double? get remainingPercentage => UsageMath.remainingPercentage(usedPercentage);
   UsageStatus get status => UsageMath.statusFor(usedPercentage);
 
-  bool hasReset(DateTime now) => UsageMath.hasReset(resetsAt, now);
-  Duration? untilReset(DateTime now) => UsageMath.untilReset(resetsAt, now);
+  /// Whether [resetsAt] can be believed at all.
+  ///
+  /// A reading cannot describe a window that had already ended when it was
+  /// taken. The usage endpoint has been seen returning a `five_hour` window
+  /// whose `resets_at` sat six hours in the past while its percentage climbed
+  /// with live use — 8% to 16% across twenty minutes, one reset value the
+  /// whole way. The figure was current; the reset field was stale. Gating on
+  /// it turned an open window into a closed one on screen and hid a number
+  /// that was perfectly good.
+  bool get hasCredibleReset =>
+      resetsAt != null && (observedAt == null || resetsAt!.isAfter(observedAt!));
+
+  /// [resetsAt] when it can be believed, null when it cannot.
+  ///
+  /// Everything that reasons about the reset — countdown, closure,
+  /// notifications — goes through this, so one stale field can never
+  /// manufacture a closed window out of a live one.
+  DateTime? get knownResetsAt => hasCredibleReset ? resetsAt : null;
+
+  bool hasReset(DateTime now) => UsageMath.hasReset(knownResetsAt, now);
+  Duration? untilReset(DateTime now) => UsageMath.untilReset(knownResetsAt, now);
 
   /// Whether this window is open right now: Claude is reporting it *and* its
   /// reset has not passed.
@@ -102,6 +121,14 @@ class LimitWindow {
   /// history, not a live reading, so this — never [isAvailable] alone — is what
   /// gates a percentage on screen.
   bool isActive(DateTime now) => isAvailable && !hasReset(now);
+
+  /// The other half of [isActive]: a window that ended while its last figure
+  /// is still on hand. Not the same as unavailable — there *is* a number, it
+  /// just belongs to a block that is over.
+  bool isClosed(DateTime now) => isAvailable && hasReset(now);
+
+  /// How long ago this window ended, or null while it is still open.
+  Duration? closedFor(DateTime now) => hasReset(now) ? now.difference(knownResetsAt!) : null;
 
   bool isStale(DateTime now, Duration staleAfter) =>
       observedAt != null && now.difference(observedAt!) > staleAfter;
@@ -160,6 +187,17 @@ class LimitWindow {
   /// Deliberately not "0%" and not "waiting for new data": Claude has not
   /// opened this window, so there is no number to show and none is implied.
   static String noActiveWindow(String id) => 'No active ${spanFor(id)} window';
+
+  /// The counterpart to [noActiveWindow], for when the window is over *and*
+  /// the last figure Claude gave for it is still worth reading.
+  ///
+  /// Both sentences refuse to pass a closed figure off as live. This one just
+  /// declines to throw it away as well: a card that blanked an 8% the moment
+  /// the block ended looked broken, when all that had happened was the block
+  /// ending. [usedPercent] and [ago] arrive already formatted so this stays
+  /// out of the presentation layer's business.
+  static String closedWindow(String id, String usedPercent, String ago) =>
+      'Last ${spanFor(id)} window: $usedPercent · closed $ago';
 
   static String labelFor(String id) {
     switch (id) {

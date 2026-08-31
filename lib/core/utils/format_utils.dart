@@ -79,6 +79,22 @@ class FormatUtils {
     return '${d.inHours}h ${d.inMinutes % 60}m';
   }
 
+  /// "10h 57m 45s" — the exact figure Claude Code prints for a session length.
+  ///
+  /// It stores milliseconds and rounds to the nearest second (39,464,529 ms is
+  /// its "10h 57m 45s", not 44s), so this rounds the same way; truncating
+  /// would put the app one second below `/usage` on half of all sessions.
+  static String durationLong(Duration? d) {
+    if (d == null) return '—';
+    final total = (d.inMilliseconds / 1000).round();
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    if (h > 0) return '${h}h ${m}m ${s}s';
+    if (m > 0) return '${m}m ${s}s';
+    return '${s}s';
+  }
+
   /// Masks a secret: "sk-ant-…7f3a". Never returns more than 4 trailing chars.
   static String maskSecret(String? secret) {
     if (secret == null || secret.isEmpty) return 'Not set';

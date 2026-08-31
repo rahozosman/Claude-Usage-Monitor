@@ -17,9 +17,11 @@ lib/
 │   ├── services/app_paths.dart  every on‑disk path the app touches
 │   └── utils/                   usage_math (thresholds, %), format_utils (countdowns, masking)
 ├── models/                      immutable data: LimitWindow, UsageSnapshot, ApiRateLimits,
-│                                ApiUsageReport, CliStatus, StatusLineData, AppSettings, ConnectionStatus
+│                                ApiUsageReport, CliStatus, StatusLineData, AppSettings, ConnectionStatus,
+│                                usage_stats (Claude Code's stats cache + the pure range/streak maths)
 ├── services/
 │   ├── claude_cli_service.dart          detect CLI, read config metadata, read status‑line file
+│   ├── claude_stats_service.dart        read ~/.claude/stats-cache.json (mtime‑guarded, never throws)
 │   ├── statusline_bridge_service.dart   install/uninstall the status‑line bridge and the SessionStart
 │   │                                    "open with Claude Code" hook (only writer to settings.json)
 │   ├── oauth_usage_service.dart         opt‑in usage endpoint client (throttled, back‑off)
@@ -36,7 +38,8 @@ lib/
 │   ├── settings/    settings_controller, settings_page
 │   └── shell/       shell_controller (3 states), edge_shell (the morphing glass), app_shell
 └── widgets/         glass_panel, usage_bar, usage_card, api_card, animated_number, countdown,
-                     status_indicator, claude_mark, app_icon_button, app_button, section_header, setting_row
+                     status_indicator, claude_mark, app_icon_button, app_button, section_header, setting_row,
+                     activity_heatmap (contribution grid), usage_stats_card ("How you use it")
 ```
 
 ## Data flow
@@ -45,6 +48,8 @@ lib/
  Claude Code ──statusLine cmd──▶ bridge.ps1 ──▶ %LOCALAPPDATA%\ClaudeUsageMonitor\statusline.json
                                                               │
  ~/.claude/.credentials.json (metadata / opt‑in token) ───────┤
+ ~/.claude/stats-cache.json  (+ transcripts for the days Claude
+                              Code has not finished counting) ──┤
  api.anthropic.com  /api/oauth/usage (opt‑in) ────────────────┤
  api.anthropic.com  /v1/messages (1‑token probe → headers) ───┼──▶ UsageRepository.fetch()
  api.anthropic.com  /v1/organizations/* (Admin key) ──────────┘          │

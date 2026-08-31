@@ -44,6 +44,7 @@ class AppSettings {
     this.showWeekly = true,
     this.showPace = true,
     this.showActivity = true,
+    this.showStats = true,
     this.showPercentages = true,
     this.showCountdown = true,
     this.notificationsEnabled = true,
@@ -85,6 +86,10 @@ class AppSettings {
 
   /// Show what consumed usage (local Claude Code sessions on this PC).
   final bool showActivity;
+
+  /// Show how the account is used over time, from Claude Code's own stats
+  /// cache (the numbers behind its `/usage` Overview tab).
+  final bool showStats;
   final bool showPercentages;
   final bool showCountdown;
   final bool notificationsEnabled;
@@ -136,6 +141,7 @@ class AppSettings {
     bool? showWeekly,
     bool? showPace,
     bool? showActivity,
+    bool? showStats,
     bool? showPercentages,
     bool? showCountdown,
     bool? notificationsEnabled,
@@ -169,6 +175,7 @@ class AppSettings {
       showWeekly: showWeekly ?? this.showWeekly,
       showPace: showPace ?? this.showPace,
       showActivity: showActivity ?? this.showActivity,
+      showStats: showStats ?? this.showStats,
       showPercentages: showPercentages ?? this.showPercentages,
       showCountdown: showCountdown ?? this.showCountdown,
       notificationsEnabled: notificationsEnabled ?? this.notificationsEnabled,
@@ -203,6 +210,7 @@ class AppSettings {
     'showWeekly': showWeekly,
     'showPace': showPace,
     'showActivity': showActivity,
+    'showStats': showStats,
     'showPercentages': showPercentages,
     'showCountdown': showCountdown,
     'notificationsEnabled': notificationsEnabled,
@@ -250,6 +258,7 @@ class AppSettings {
       showWeekly: b('showWeekly', d.showWeekly),
       showPace: b('showPace', d.showPace),
       showActivity: b('showActivity', d.showActivity),
+      showStats: b('showStats', d.showStats),
       showPercentages: b('showPercentages', d.showPercentages),
       showCountdown: b('showCountdown', d.showCountdown),
       notificationsEnabled: b('notificationsEnabled', d.notificationsEnabled),

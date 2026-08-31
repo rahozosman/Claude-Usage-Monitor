@@ -126,6 +126,63 @@ prompt). Multi‑block messages share a `requestId` and are counted once.
 - Cost control: first scan runs in a background isolate; afterwards only files that grew are read from
   their previous byte offset (≤4 MB per file per refresh).
 
+## 4b. How you use it (Claude Code's own statistics)
+
+The **"How you use it"** card reads `~/.claude/stats-cache.json` — the file behind Claude Code's own
+`/usage` → **Overview** tab. Nothing in it is derived by this app:
+
+| Field in the file | What the card shows |
+| --- | --- |
+| `dailyActivity[] {date, messageCount, sessionCount, toolCallCount}` | the heatmap, Active days, Most active day, both streaks, Sessions, tool calls |
+| `dailyModelTokens[] {date, tokensByModel}` | Total tokens per range, Favourite model |
+| `modelUsage{model → inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens}` | the Input · Output · Cache read · Cache write bar |
+| `totalSessions`, `totalMessages` | the all-time totals (authoritative even if day rows are ever pruned) |
+| `longestSession {duration, messageCount, timestamp}` | Longest session |
+| `firstSessionDate` | where the heatmap starts, and the Active-days denominator |
+| `hourCounts {0..23}` | "When you work" — a histogram Claude Code keeps but never displays |
+
+- Dates in `dailyActivity` / `dailyModelTokens` are **local** calendar days (`YYYY-MM-DD`), so they are
+  parsed as local midnight; reading them as UTC would slide every day by the offset.
+- `duration` is milliseconds and Claude Code **rounds** to the nearest second — 39,464,529 ms is its
+  "10h 57m 45s", not 44s — so `FormatUtils.durationLong` rounds the same way.
+- Tokens per day are input + cache write + cache read + output, the same basis as §4. Summed, the day
+  rows and `modelUsage` agree to the token.
+
+### Topping up the days Claude Code has not finished counting
+
+The file lags: it carries a `lastComputedDate`, and `/usage` renders it **plus** whatever the
+transcripts have gained since — which is why its screen can read several sessions ahead of the file.
+This app does the same, from the same transcripts (§4), so the card matches `/usage`:
+
+- Only days **on or after `lastComputedDate`** are counted here; everything before it Claude Code has
+  already counted in full and is used exactly as written.
+- A day is only replaced by a **fuller** count of itself. Claude Code may have seen transcripts that
+  have since been deleted, so a thinner local count is ignored rather than blended in.
+- Days older than the 7-day transcript scan are never used: the scan cannot prove them complete.
+- Counting rules, verified against Claude Code's own cache to the message on days it had finished:
+  **messages** = every entry in the transcript's message chain (`user`, `assistant`, `attachment`,
+  `system` — the lines that open with `parentUuid`); the bookkeeping lines beside them
+  (`file-history-delta`, `queue-operation`, `frame-link`) carry no `uuid` and are not counted.
+  **Tool calls** = `tool_use` blocks in assistant content, counted per line (a message split across
+  blocks repeats its `requestId`, but its calls are separate calls). **Sessions** = transcripts with
+  at least one message that day.
+- `modelUsage`, `longestSession` and `hourCounts` are **not** topped up — they are Claude Code's own
+  all-time tallies, and the card labels them as such.
+
+### What the card refuses to do
+
+- The input/output/cache split exists per model for **all time only**. For **7 days** it is computed
+  from this PC's transcripts instead, and says how many of the range's tokens that actually covers;
+  for **30 days** there is no honest source, so it says so and shows nothing.
+- Where the all-time split (as of `lastComputedDate`) is smaller than the topped-up token total, the
+  difference is stated rather than spread across the four classes.
+- Streaks and active days are recomputed inside the chosen range. The longest session is an all-time
+  fact and is tagged "all time" when it falls outside the range.
+- A day that has not started yet does not break a streak: the current streak counts back from today,
+  or from yesterday when today is still silent.
+- No stats cache → the card says so and points at `/usage`; an unrecognised `version` is flagged and
+  whatever parses is still read.
+
 ## 5. Other devices on the same account
 
 Claude exposes **no per-device information** anywhere: the status line and the transcripts are per

@@ -131,28 +131,32 @@ class _LimitRow extends StatelessWidget {
     return ValueListenableBuilder<DateTime>(
       valueListenable: clock,
       builder: (context, now, _) {
-        final reset = window.hasReset(now);
-        final available = window.isAvailable && !reset;
+        final closed = window.isClosed(now);
+        final live = window.isActive(now);
         final stale = window.isStale(now, AppConstants.staleAfter);
         final meta = !window.isAvailable
             ? (window.unavailableReason ?? 'Not provided by Claude')
-            : reset
-            ? LimitWindow.noActiveWindow(window.id)
+            : closed
+            // The row's own label already names the span, so the short form
+            // here — the card carries the full sentence.
+            ? 'closed ${FormatUtils.relative(window.knownResetsAt, now)}'
             : <String>[
                 '${FormatUtils.percent(window.remainingPercentage)} left',
-                if (showCountdown && window.resetsAt != null)
+                if (showCountdown && window.knownResetsAt != null)
                   'resets in ${FormatUtils.countdown(window.untilReset(now))}',
                 if (stale) 'stale',
               ].join(' · ');
 
         return _Section(
           label: label,
-          percent: available ? window.usedPercentage : null,
-          fraction: available ? UsageMath.fraction(window.usedPercentage) : null,
-          status: available ? window.status : UsageStatus.unknown,
+          // A closed figure is kept, but greyed: `stale` is what dims the
+          // number and `unknown` is what drains the colour out of the bar.
+          percent: window.isAvailable ? window.usedPercentage : null,
+          fraction: window.isAvailable ? UsageMath.fraction(window.usedPercentage) : null,
+          status: live ? window.status : UsageStatus.unknown,
           meta: meta,
           motion: motion,
-          stale: stale,
+          stale: stale || closed,
         );
       },
     );

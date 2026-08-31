@@ -20,6 +20,7 @@ import '../../widgets/devices_card.dart';
 import '../../widgets/app_icon_button.dart';
 import '../../widgets/glass_panel.dart';
 import '../../widgets/app_scroll_view.dart';
+import '../../widgets/usage_stats_card.dart';
 import '../../widgets/window_caption.dart';
 import '../../widgets/section_header.dart';
 import '../../widgets/status_indicator.dart';
@@ -96,6 +97,16 @@ class DashboardPage extends StatelessWidget {
         ActivityCard(
           report: snap.local,
           scanning: usage.localScanning,
+          motion: motion,
+          clock: usage.clock,
+          opacity: settings.transparency,
+        ),
+      // Straight after it: the activity card says what spent the tokens, this
+      // says how that has gone day after day.
+      if (settings.showStats)
+        UsageStatsCard(
+          stats: snap.stats,
+          local: snap.local,
           motion: motion,
           clock: usage.clock,
           opacity: settings.transparency,

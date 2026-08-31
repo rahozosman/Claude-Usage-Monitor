@@ -6,6 +6,7 @@ import 'device_activity.dart';
 import 'connection_status.dart';
 import 'limit_window.dart';
 import 'session_usage.dart';
+import 'usage_stats.dart';
 
 /// Everything the dashboard renders, produced by [UsageRepository].
 class UsageSnapshot {
@@ -18,6 +19,7 @@ class UsageSnapshot {
     this.api,
     this.apiReport,
     this.local,
+    this.stats,
     this.devices = DeviceSyncResult.none,
     this.apiError,
     this.subscriptionError,
@@ -54,6 +56,10 @@ class UsageSnapshot {
   /// Local Claude Code session usage (this PC only).
   final LocalUsageReport? local;
 
+  /// Claude Code's own usage statistics (`~/.claude/stats-cache.json`), with
+  /// the days it has not finished counting filled in from the transcripts.
+  final UsageStats? stats;
+
   /// What the other devices on this account are doing (shared folder).
   final DeviceSyncResult devices;
   final AppError? apiError;
@@ -76,6 +82,7 @@ class UsageSnapshot {
     ApiRateLimits? api,
     ApiUsageReport? apiReport,
     LocalUsageReport? local,
+    UsageStats? stats,
     DeviceSyncResult? devices,
     AppError? apiError,
     AppError? subscriptionError,
@@ -93,6 +100,7 @@ class UsageSnapshot {
       api: api ?? this.api,
       apiReport: apiReport ?? this.apiReport,
       local: local ?? this.local,
+      stats: stats ?? this.stats,
       devices: devices ?? this.devices,
       apiError: clearApiError ? null : (apiError ?? this.apiError),
       subscriptionError: clearSubscriptionError ? null : (subscriptionError ?? this.subscriptionError),

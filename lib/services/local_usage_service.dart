@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../core/services/app_paths.dart';
 import '../models/session_usage.dart';
+import '../models/usage_stats.dart';
 
 /// Reads the transcripts Claude Code keeps under `~/.claude/projects/` and
 /// aggregates real token counts per session (task) and per model.
@@ -191,6 +192,7 @@ class LocalUsageService {
   LocalUsageReport _buildReport(Set<String> active, int scanned) {
     final now = DateTime.now();
     final cutoff = now.subtract(window);
+    final cutoffDay = DateTime(cutoff.year, cutoff.month, cutoff.day);
     final todayKey = _dayKey(now);
     final today = <String, int>{};
     final week = <String, int>{};
@@ -200,11 +202,11 @@ class LocalUsageService {
     for (final st in _files.values) {
       if (st.messages == 0 || st.lastAt == null || st.lastAt!.isBefore(cutoff)) continue;
       st.dayModelTokens.forEach((day, byModel) {
-        final dayDate = DateTime.tryParse(day);
-        if (dayDate == null || dayDate.isBefore(DateTime(cutoff.year, cutoff.month, cutoff.day))) return;
+        final dayDate = UsageStats.parseDay(day);
+        if (dayDate == null || dayDate.isBefore(cutoffDay)) return;
         byModel.forEach((model, tokens) {
-          week[model] = (week[model] ?? 0) + tokens;
-          if (day == todayKey) today[model] = (today[model] ?? 0) + tokens;
+          week[model] = (week[model] ?? 0) + tokens.total;
+          if (day == todayKey) today[model] = (today[model] ?? 0) + tokens.total;
         });
       });
       if (st.dayModelTokens.containsKey(todayKey)) todaySessions++;
@@ -235,7 +237,34 @@ class LocalUsageService {
       todaySessionCount: todaySessions,
       activeSessionCount: active.length,
       scannedFiles: scanned,
+      dayRollups: _rollups(cutoffDay),
     );
+  }
+
+  /// The same per-day figures Claude Code keeps in its stats cache — messages,
+  /// sessions, tool calls and tokens per model — counted from the transcripts
+  /// this scan already read. Used to fill in the days Claude Code has not
+  /// finished counting (see [UsageStats.withTranscriptDays]) and to give the
+  /// 7-day input/output/cache split, which its cache only holds for all time.
+  List<DayRollup> _rollups(DateTime cutoffDay) {
+    final byDay = <String, _DayAggregate>{};
+    for (final st in _files.values) {
+      final days = <String>{...st.dayMessages.keys, ...st.dayToolCalls.keys, ...st.dayModelTokens.keys};
+      for (final day in days) {
+        final date = UsageStats.parseDay(day);
+        if (date == null || date.isBefore(cutoffDay)) continue;
+        final agg = byDay.putIfAbsent(day, () => _DayAggregate(date));
+        final messages = st.dayMessages[day] ?? 0;
+        agg.messages += messages;
+        agg.toolCalls += st.dayToolCalls[day] ?? 0;
+        // One transcript is one session, counted for every day it spoke on —
+        // which is how Claude Code's own per-day session counts come out.
+        if (messages > 0) agg.sessions++;
+        st.dayModelTokens[day]?.forEach(agg.addTokens);
+      }
+    }
+    final out = byDay.values.map((a) => a.toRollup()).toList()..sort((a, b) => a.date.compareTo(b.date));
+    return out;
   }
 
   static String _dayKey(DateTime t) {
@@ -277,7 +306,12 @@ class _FileState {
   int messages = 0;
   DateTime? firstAt;
   DateTime? lastAt;
-  final Map<String, Map<String, int>> dayModelTokens = <String, Map<String, int>>{};
+  final Map<String, Map<String, _Tokens>> dayModelTokens = <String, Map<String, _Tokens>>{};
+
+  /// Day → entries in this transcript's message chain, and → tool calls: the
+  /// two counts Claude Code publishes per day in its stats cache.
+  final Map<String, int> dayMessages = <String, int>{};
+  final Map<String, int> dayToolCalls = <String, int>{};
 
   void reset() {
     size = 0;
@@ -293,6 +327,8 @@ class _FileState {
     input = cacheWrite = cacheRead = output = messages = 0;
     firstAt = lastAt = null;
     dayModelTokens.clear();
+    dayMessages.clear();
+    dayToolCalls.clear();
   }
 
   void consume(String chunk) {
@@ -300,6 +336,15 @@ class _FileState {
     final lines = text.split('\n');
     carry = lines.removeLast(); // incomplete trailing line (or '')
     for (final line in lines) {
+      // Claude Code counts, per day, every entry in the transcript's message
+      // chain — user, assistant, attachment and system. Those are exactly the
+      // lines that open with `parentUuid`; the bookkeeping entries beside them
+      // (file history, queue operations, frame links) carry no uuid and are
+      // not counted. Checked against its own stats cache, to the message.
+      if (line.startsWith(_chainPrefix)) {
+        final day = _dayOfLine(line);
+        if (day != null) dayMessages[day] = (dayMessages[day] ?? 0) + 1;
+      }
       if (line.contains('"type":"assistant"')) {
         _assistant(line);
       } else if (title == null && line.contains('"type":"ai-title"')) {
@@ -315,6 +360,22 @@ class _FileState {
     if (o == null || o['type'] != 'assistant') return;
     final msg = o['message'];
     if (msg is! Map) return;
+
+    final at = _time(o['timestamp']);
+    final dayKey = at == null ? null : LocalUsageService._dayKey(at);
+
+    // One tool call per `tool_use` block, counted on every line: a message
+    // split across blocks repeats its requestId, but its calls are separate
+    // calls, so this is counted before the de-duplication below.
+    final content = msg['content'];
+    if (dayKey != null && content is List) {
+      var calls = 0;
+      for (final block in content) {
+        if (block is Map && block['type'] == 'tool_use') calls++;
+      }
+      if (calls > 0) dayToolCalls[dayKey] = (dayToolCalls[dayKey] ?? 0) + calls;
+    }
+
     final usage = msg['usage'];
     if (usage is! Map) return;
     final id = (o['requestId'] ?? msg['id'])?.toString();
@@ -335,18 +396,19 @@ class _FileState {
     if (model != null && model.isNotEmpty) models.add(model);
     cwd ??= o['cwd']?.toString();
 
-    final ts = _time(o['timestamp']);
-    if (ts != null) {
-      firstAt = firstAt == null || ts.isBefore(firstAt!) ? ts : firstAt;
-      lastAt = lastAt == null || ts.isAfter(lastAt!) ? ts : lastAt;
-      if (model != null && model.isNotEmpty && (latestModelAt == null || !ts.isBefore(latestModelAt!))) {
+    if (at != null && dayKey != null) {
+      firstAt = firstAt == null || at.isBefore(firstAt!) ? at : firstAt;
+      lastAt = lastAt == null || at.isAfter(lastAt!) ? at : lastAt;
+      if (model != null && model.isNotEmpty && (latestModelAt == null || !at.isBefore(latestModelAt!))) {
         latestModel = model;
-        latestModelAt = ts;
+        latestModelAt = at;
       }
-      final day = LocalUsageService._dayKey(ts);
-      final byModel = dayModelTokens.putIfAbsent(day, () => <String, int>{});
-      final key = model ?? 'unknown';
-      byModel[key] = (byModel[key] ?? 0) + i + cw + cr + out;
+      final byModel = dayModelTokens.putIfAbsent(dayKey, () => <String, _Tokens>{});
+      final tokens = byModel.putIfAbsent(model ?? 'unknown', _Tokens.new);
+      tokens.input += i;
+      tokens.cacheWrite += cw;
+      tokens.cacheRead += cr;
+      tokens.output += out;
     }
   }
 
@@ -371,6 +433,23 @@ class _FileState {
     firstPrompt = text.length > 90 ? '${text.substring(0, 90)}…' : text;
   }
 
+  /// Every message-chain entry opens with this key, and nothing else does.
+  static const String _chainPrefix = '{"parentUuid":';
+  static const String _timestampKey = '"timestamp":"';
+
+  /// The entry's own timestamp, without decoding the line — in a chain entry
+  /// the first `timestamp` is always the top-level one (the nested ones, if
+  /// any, sit inside the message body that follows it).
+  static String? _dayOfLine(String line) {
+    final at = line.indexOf(_timestampKey);
+    if (at < 0) return null;
+    final start = at + _timestampKey.length;
+    final end = line.indexOf('"', start);
+    if (end <= start) return null;
+    final time = DateTime.tryParse(line.substring(start, end));
+    return time == null ? null : LocalUsageService._dayKey(time);
+  }
+
   static Map<String, dynamic>? _decode(String line) {
     try {
       final o = jsonDecode(line);
@@ -385,4 +464,39 @@ class _FileState {
     if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
     return null;
   }
+}
+
+/// Running per-model token counts for one day of one transcript.
+class _Tokens {
+  int input = 0;
+  int cacheWrite = 0;
+  int cacheRead = 0;
+  int output = 0;
+
+  int get total => input + cacheWrite + cacheRead + output;
+
+  ModelTotals toTotals() => ModelTotals(input: input, output: output, cacheRead: cacheRead, cacheWrite: cacheWrite);
+}
+
+/// One day, summed across every transcript that spoke on it.
+class _DayAggregate {
+  _DayAggregate(this.date);
+
+  final DateTime date;
+  int messages = 0;
+  int sessions = 0;
+  int toolCalls = 0;
+  final Map<String, ModelTotals> tokens = <String, ModelTotals>{};
+
+  void addTokens(String model, _Tokens value) {
+    tokens[model] = (tokens[model] ?? const ModelTotals()) + value.toTotals();
+  }
+
+  DayRollup toRollup() => DayRollup(
+    date: date,
+    messages: messages,
+    sessions: sessions,
+    toolCalls: toolCalls,
+    tokensByModel: tokens,
+  );
 }

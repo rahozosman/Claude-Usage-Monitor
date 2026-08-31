@@ -49,6 +49,10 @@ class UsageCard extends StatelessWidget {
           final reset = window.hasReset(now);
           final stale = window.isStale(now, AppConstants.staleAfter);
           final available = window.isAvailable;
+          // Closed is its own state, not a flavour of unavailable: the figure
+          // is real and recent, it just stopped being live when the block
+          // ended. Shown dimmed throughout so it can never read as current.
+          final closed = available && reset;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -58,10 +62,12 @@ class UsageCard extends StatelessWidget {
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    if (available && stale) _Chip(label: 'Stale', color: c.statusModerate),
-                    if (available && stale) const SizedBox(width: AppDimens.s6),
-                    if (available && reset)
-                      _Chip(label: 'Reset', color: c.statusOffline)
+                    // "Stale" means the feed is late. A closed window is not
+                    // late — it is finished — so Closed stands on its own.
+                    if (available && stale && !closed) _Chip(label: 'Stale', color: c.statusModerate),
+                    if (available && stale && !closed) const SizedBox(width: AppDimens.s6),
+                    if (closed)
+                      _Chip(label: 'Closed', color: c.statusOffline)
                     else if (available)
                       _Chip(label: _statusLabel(window.status), color: c.forStatus(window.status))
                     else
@@ -75,9 +81,14 @@ class UsageCard extends StatelessWidget {
                 children: <Widget>[
                   if (available && showPercentages)
                     AnimatedNumber(
-                      value: reset ? null : window.usedPercentage,
+                      value: window.usedPercentage,
                       motion: motion,
-                      style: t.titleMedium?.copyWith(fontSize: 26, height: 1, fontWeight: FontWeight.w600),
+                      style: t.titleMedium?.copyWith(
+                        fontSize: 26,
+                        height: 1,
+                        fontWeight: FontWeight.w600,
+                        color: closed ? c.textTertiary : null,
+                      ),
                     )
                   else
                     Text(
@@ -88,12 +99,17 @@ class UsageCard extends StatelessWidget {
                   if (available)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 3),
-                      child: Text('used', style: t.bodySmall),
+                      child: Text(closed ? 'used before it closed' : 'used', style: t.bodySmall),
                     ),
                   const Spacer(),
-                  if (available && !reset && showCountdown)
+                  if (closed)
+                    Text(
+                      'closed ${FormatUtils.relative(window.knownResetsAt, now)}',
+                      style: t.bodySmall?.copyWith(color: c.textTertiary, fontWeight: FontWeight.w500),
+                    )
+                  else if (available && showCountdown && window.knownResetsAt != null)
                     Countdown(
-                      resetsAt: window.resetsAt,
+                      resetsAt: window.knownResetsAt,
                       clock: clock,
                       prefix: 'Resets in ',
                       resetText: 'reset · awaiting data',
@@ -103,14 +119,16 @@ class UsageCard extends StatelessWidget {
               ),
               const SizedBox(height: AppDimens.s10),
               UsageBar(
-                fraction: available && !reset ? UsageMath.fraction(window.usedPercentage) : null,
-                status: reset ? UsageStatus.unknown : window.status,
+                fraction: available ? UsageMath.fraction(window.usedPercentage) : null,
+                // Grey, not the status colour: a closed 95% is not a warning
+                // about anything happening now.
+                status: closed ? UsageStatus.unknown : window.status,
                 motion: motion,
                 height: AppDimens.barThick,
-                stale: stale,
+                stale: stale || closed,
               ),
               const SizedBox(height: AppDimens.s12),
-              if (available) ..._details(context, now, reset, stale) else _unavailable(context),
+              if (available) ..._details(context, now, closed, stale) else _unavailable(context),
             ],
           );
         },
@@ -118,19 +136,34 @@ class UsageCard extends StatelessWidget {
     );
   }
 
-  List<Widget> _details(BuildContext context, DateTime now, bool reset, bool stale) {
+  List<Widget> _details(BuildContext context, DateTime now, bool closed, bool stale) {
     final c = context.colors;
     final rows = <(String, String)>[
-      ('Used', reset ? LimitWindow.noActiveWindow(window.id) : FormatUtils.percent(window.usedPercentage)),
-      ('Remaining', reset ? '—' : FormatUtils.percent(window.remainingPercentage)),
+      ('Used', FormatUtils.percent(window.usedPercentage)),
+      // Remaining is a live quantity. There is nothing left to spend in a
+      // block that is over, so the row goes rather than reading "92%".
+      if (!closed) ('Remaining', FormatUtils.percent(window.remainingPercentage)),
       ('Amount', window.used != null ? FormatUtils.integer(window.used) : 'Not provided by Claude'),
-      ('Resets at', FormatUtils.absolute(window.resetsAt, now)),
+      // Not window.resetsAt: an uncredible one prints as "—" rather than
+      // as a reset time in the past, which is what it literally is.
+      (closed ? 'Closed at' : 'Resets at', FormatUtils.absolute(window.knownResetsAt, now)),
       ('Updated', FormatUtils.relative(window.observedAt, now)),
       ('Source', window.source.label),
     ];
     return <Widget>[
-      _DetailGrid(rows: rows, dim: stale),
-      if (stale)
+      _DetailGrid(rows: rows, dim: stale || closed),
+      if (closed)
+        Padding(
+          padding: const EdgeInsets.only(top: AppDimens.s8),
+          child: Text(
+            '${LimitWindow.closedWindow(window.id, FormatUtils.percent(window.usedPercentage), FormatUtils.relative(window.knownResetsAt, now))}. '
+            'A new one opens on your next message to Claude.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: c.textTertiary),
+          ),
+        ),
+      // Staleness is about the feed, closure about the window: a closed one is
+      // not late, so the warning would be noise on top of the line above.
+      if (stale && !closed)
         Padding(
           padding: const EdgeInsets.only(top: AppDimens.s8),
           child: Text(

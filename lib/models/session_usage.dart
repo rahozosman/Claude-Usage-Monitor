@@ -1,3 +1,5 @@
+import 'usage_stats.dart';
+
 /// Token usage of one local Claude Code session (task), computed from the
 /// transcript files Claude Code keeps on this machine.
 class SessionUsage {
@@ -54,6 +56,7 @@ class LocalUsageReport {
     required this.todaySessionCount,
     required this.activeSessionCount,
     required this.scannedFiles,
+    this.dayRollups = const <DayRollup>[],
   });
 
   final DateTime computedAt;
@@ -65,6 +68,10 @@ class LocalUsageReport {
   final int todaySessionCount;
   final int activeSessionCount;
   final int scannedFiles;
+
+  /// The same scan, rolled up per calendar day: messages, sessions, tool calls
+  /// and the per-model token split. Ascending by date, last 7 days.
+  final List<DayRollup> dayRollups;
 
   int get todayTotal => todayTokensByModel.values.fold(0, (a, b) => a + b);
   int get weekTotal => weekTokensByModel.values.fold(0, (a, b) => a + b);
